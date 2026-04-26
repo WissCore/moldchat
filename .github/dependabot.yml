@@ -1,0 +1,29 @@
+# Dependabot is GitHub's built-in dependency updater + security advisory pipeline.
+# Renovate (renovate.json) handles routine version bumps.
+# Dependabot is kept ENABLED only for its native security pipeline:
+# `open-pull-requests-limit: 0` disables routine PRs but keeps security PRs flowing.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: swift
+    directory: /apps/ios
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

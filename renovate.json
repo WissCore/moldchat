@@ -1,0 +1,45 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "group:allNonMajor"
+  ],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "minimumReleaseAge": "3 days",
+  "rangeStrategy": "bump",
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": "0 days",
+    "labels": ["security", "dependencies"]
+  },
+  "packageRules": [
+    {
+      "description": "Crypto dependencies: no automerge, require crypto+security review",
+      "matchPackageNames": [
+        "libsignal",
+        "libsignal-android",
+        "libsignal-client",
+        "/^golang\\.org/x/crypto/",
+        "/^github\\.com/cloudflare/circl/",
+        "/^filippo\\.io/"
+      ],
+      "automerge": false,
+      "reviewers": ["team:WissCore/crypto", "team:WissCore/security"],
+      "addLabels": ["crypto-review-required"]
+    },
+    {
+      "description": "Dev tooling: auto-merge minor/patch after CI",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Go modules: group together",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    }
+  ]
+}

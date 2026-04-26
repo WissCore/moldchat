@@ -1,0 +1,5 @@
+Contact: https://github.com/WissCore/moldchat/security/advisories/new
+Contact: mailto:alan@wisscore.com
+Expires: 2027-04-25T00:00:00Z
+Preferred-Languages: en, ru
+Canonical: https://moldchat.com/.well-known/security.txt

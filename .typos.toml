@@ -1,0 +1,63 @@
+[default.extend-words]
+# Project names and identifiers — not typos
+moldd       = "moldd"
+MoldChat    = "MoldChat"
+moldchat    = "moldchat"
+moldapp     = "moldapp"
+WissCore    = "WissCore"
+wisscore    = "wisscore"
+MoldChatHQ  = "MoldChatHQ"
+
+# Cryptographic and security tooling proper names
+libsignal   = "libsignal"
+gosec       = "gosec"
+gofumpt     = "gofumpt"
+gofmt       = "gofmt"
+golangci    = "golangci"
+shfmt       = "shfmt"
+shellcheck  = "shellcheck"
+gitleaks    = "gitleaks"
+trufflehog  = "trufflehog"
+zizmor      = "zizmor"
+sigstore    = "sigstore"
+gitsign     = "gitsign"
+addlicense  = "addlicense"
+detekt      = "detekt"
+ktlint      = "ktlint"
+ktfmt       = "ktfmt"
+swiftlint   = "swiftlint"
+markdownlint = "markdownlint"
+yamllint    = "yamllint"
+actionlint  = "actionlint"
+osv         = "osv"
+slsa        = "slsa"
+SLSA        = "SLSA"
+SBOM        = "SBOM"
+SPDX        = "SPDX"
+PVR         = "PVR"
+DCO         = "DCO"
+ARC         = "ARC"
+ARCs        = "ARCs"
+OPAQUE      = "OPAQUE"
+PQXDH       = "PQXDH"
+SPQR        = "SPQR"
+ECH         = "ECH"
+DPI         = "DPI"
+GFW         = "GFW"
+
+# Comparable projects mentioned in docs
+SimpleX     = "SimpleX"
+Briar       = "Briar"
+Tor         = "Tor"
+Sigstore    = "Sigstore"
+Renovate    = "Renovate"
+Dependabot  = "Dependabot"
+
+[files]
+extend-exclude = [
+  "LICENSE",
+  "go.sum",
+  "*.lock",
+  "*.svg",
+  ".github/license-header.txt",
+]

@@ -1,0 +1,60 @@
+# Triggered on component-versioned tag pushes (server-vX.Y.Z).
+# Builds the binary, generates an SBOM, and produces SLSA build provenance
+# and SBOM attestations signed via keyless Sigstore (OIDC).
+# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
+name: sigstore-sign
+
+on:
+  push:
+    tags:
+      - 'server-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+
+      - name: Build
+        working-directory: server
+        run: |
+          mkdir -p ../dist
+          go build -trimpath -ldflags="-s -w" -o ../dist/moldd ./cmd/moldd
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./server
+          format: spdx-json
+          output-file: dist/moldd.spdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/moldd
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/moldd
+          sbom-path: dist/moldd.spdx.json

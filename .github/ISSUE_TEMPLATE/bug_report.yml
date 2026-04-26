@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible bug in MoldChat.
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do NOT use this form for security vulnerabilities.**
+        Use [Private Vulnerability Reporting](https://github.com/WissCore/moldchat/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: MoldChat version
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - server
+        - android
+        - ios
+        - docs
+        - build/release
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, and what happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, device model, network conditions, anything relevant.
+    validations:
+      required: true

@@ -1,0 +1,114 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks protect --staged --redact -v
+    trufflehog:
+      run: trufflehog filesystem . --no-update --only-verified --fail
+      skip:
+        - merge
+        - rebase
+    license-header:
+      glob: "*.go"
+      run: addlicense -check -c "Alan Wiss <alan@moldchat.com>" -y 2026 -f .github/license-header.txt {staged_files}
+      fail_text: "Run 'addlicense -c \"Alan Wiss <alan@moldchat.com>\" -y 2026 -f .github/license-header.txt {staged_files}' to add headers"
+    gofumpt:
+      glob: "*.go"
+      run: gofumpt -l {staged_files}
+      fail_text: "Run 'gofumpt -w' on the listed files"
+    go-vet:
+      glob: "*.go"
+      run: go -C server vet ./...
+    golangci-lint:
+      glob: "*.go"
+      run: cd server && golangci-lint run ./...
+      skip:
+        - merge
+        - rebase
+    gosec:
+      glob: "*.go"
+      run: gosec -quiet ./server/...
+    ktlint:
+      glob: "*.kt"
+      run: ktlint {staged_files}
+    detekt:
+      glob: "*.kt"
+      run: detekt -i {staged_files}
+    swiftlint:
+      glob: "*.swift"
+      run: swiftlint lint --strict {staged_files}
+    swift-format:
+      glob: "*.swift"
+      run: swift-format lint --strict {staged_files}
+    shellcheck:
+      glob: "*.sh"
+      run: shellcheck {staged_files}
+    shfmt:
+      glob: "*.sh"
+      run: shfmt -d -i 2 -ci {staged_files}
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: actionlint {staged_files}
+    yamllint:
+      glob: "*.{yml,yaml}"
+      run: yamllint -s {staged_files}
+    markdownlint:
+      glob: "*.md"
+      run: markdownlint {staged_files}
+    typos:
+      run: typos
+
+commit-msg:
+  commands:
+    conventional-commits:
+      run: |
+        head -1 {1} | grep -qE '^(feat|fix|docs|chore|refactor|perf|test|build|ci|style|revert)(\([a-z0-9-]+\))?!?: .{1,72}$' \
+          || { echo "Commit subject must follow Conventional Commits 1.0 (e.g. 'feat(server): add foo')"; exit 1; }
+    dco:
+      run: ./scripts/check-dco.sh {1}
+
+pre-push:
+  parallel: true
+  commands:
+    block-direct-push-to-main:
+      run: |
+        current=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$current" = "main" ]; then
+          echo "Direct pushes to 'main' are blocked. Use a feature branch and open a pull request."
+          exit 1
+        fi
+    block-wip-and-fixup-commits:
+      run: |
+        upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo "")
+        if [ -z "$upstream" ]; then
+          range="HEAD"
+        else
+          range="$upstream..HEAD"
+        fi
+        bad=$(git log --format=%s "$range" 2>/dev/null | grep -iE '^(fixup!|squash!|wip([: ]|$)|\[wip\]|temp:|tmp:)' || true)
+        if [ -n "$bad" ]; then
+          echo "Pre-push blocked: the following commits look unfinished and must be squashed or amended:"
+          echo "$bad"
+          exit 1
+        fi
+    go-build:
+      glob: "*.go"
+      run: cd server && go build ./...
+    go-test:
+      glob: "*.go"
+      run: cd server && go test -race -count=1 ./...
+    gitleaks-full-history:
+      run: gitleaks detect --redact -v
+    osv-scanner:
+      run: osv-scanner scan source --recursive --skip-git ./
+    addlicense-full-repo:
+      run: |
+        files=$(git ls-files '*.go')
+        if [ -n "$files" ]; then
+          addlicense -check -c "Alan Wiss <alan@moldchat.com>" -y 2026 -f .github/license-header.txt $files
+        fi
+    actionlint-all-workflows:
+      run: actionlint
+    govulncheck:
+      glob: "*.go"
+      run: cd server && govulncheck ./...

@@ -1,0 +1,63 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    # Standard correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Security
+    - gosec
+    - bodyclose
+    - sqlclosecheck
+    - rowserrcheck
+
+    # Style and bugs
+    - revive
+    - gocritic
+    - errorlint
+    - misspell
+    - unconvert
+    - unparam
+    - copyloopvar
+    - tparallel
+    - thelper
+    - wastedassign
+    - bidichk
+    - durationcheck
+    - makezero
+    - nilerr
+    - predeclared
+    - asciicheck
+    - asasalint
+    - reassign
+
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+        - name: package-comments
+        - name: exported
+        - name: unused-parameter
+        - name: unreachable-code
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

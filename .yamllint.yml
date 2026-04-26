@@ -1,0 +1,21 @@
+extends: default
+
+rules:
+  # GitHub Actions uses `on:` as a key — yamllint's truthy rule false-positives.
+  truthy:
+    check-keys: false
+
+  line-length:
+    max: 200
+    level: warning
+
+  # YAML documents in this repo do not start with `---`.
+  document-start: disable
+
+  # Comment indentation varies between hand-written and tool-generated files.
+  comments-indentation: disable
+
+  # Allow either block or compact list style; both are valid.
+  indentation:
+    spaces: 2
+    indent-sequences: consistent

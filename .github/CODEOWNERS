@@ -1,0 +1,30 @@
+# CODEOWNERS — partition by sensitivity.
+# Listed reviewers must approve any PR touching their paths.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default
+*                                    @WissCore/maintainers
+
+# Crypto-critical paths (require crypto + security review)
+/server/internal/crypto/             @WissCore/crypto @WissCore/security
+/apps/android/**/crypto/             @WissCore/crypto @WissCore/security
+/apps/ios/**/Crypto/                 @WissCore/crypto @WissCore/security
+/docs/specs/                         @WissCore/crypto @WissCore/security
+
+# CI / Workflows (security review — protects build pipeline)
+/.github/workflows/                  @WissCore/security
+/.github/CODEOWNERS                  @WissCore/security
+/.github/dependabot.yml              @WissCore/security
+/renovate.json                       @WissCore/security
+/lefthook.yml                        @WissCore/security
+/scripts/check-dco.sh                @WissCore/security
+
+# Security policies and disclosure
+/SECURITY.md                         @WissCore/security
+/.well-known/security.txt            @WissCore/security
+
+# Release pipeline
+/.goreleaser.yaml                    @WissCore/security
+/scripts/release/                    @WissCore/security
+/release-please-config.json          @WissCore/security
+/.release-please-manifest.json       @WissCore/security

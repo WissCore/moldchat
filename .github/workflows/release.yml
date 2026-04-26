@@ -1,0 +1,30 @@
+# Release Please opens a release PR based on Conventional Commits since the
+# previous release. Merging that PR creates the per-component tag and a draft
+# release, which in turn triggers sigstore-sign.yml to attach signed artifacts.
+# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

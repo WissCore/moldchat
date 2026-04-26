@@ -1,0 +1,108 @@
+# Operating systems
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# IDEs / editors
+.idea/
+.vscode/
+*.iml
+.fleet/
+*.code-workspace
+
+# Claude Code session data (kept locally, never committed)
+.claude/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/**/*.key
+*.crt
+*.p12
+*.keystore
+*.jks
+secrets/
+.secrets/
+
+# Logs
+*.log
+logs/
+
+# Build artifacts (generic)
+build/
+dist/
+out/
+target/
+bin/
+obj/
+
+# Go
+*.test
+*.out
+coverage.out
+coverage.html
+vendor/
+
+# Android / Kotlin / Gradle
+.gradle/
+local.properties
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+.cxx/
+proguard/
+release/
+debug/
+*.hprof
+
+# iOS / Swift / Xcode
+.build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata
+xcuserdata/
+*.ipa
+Pods/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Node / docs site
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.next/
+.docusaurus/
+site/
+
+# Python (in case tools/ ever uses Python)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Litestream local state
+*.db-journal
+*.db-shm
+*.db-wal
+*.ltx
+litestream-data/
+
+# Tooling caches
+.cache/
+.tool-cache/
+
+# mise (mise.lock IS committed for reproducibility; only local state is ignored)
+.mise/
+.mise.local.toml
+mise.local.toml

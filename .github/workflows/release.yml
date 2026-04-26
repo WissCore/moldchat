@@ -26,6 +26,7 @@ jobs:
       - name: Run release-please
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071  # v4
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          signoff: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          signoff: "Alan Wiss <alan@moldchat.com>"

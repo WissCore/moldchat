@@ -1,7 +1,6 @@
 # Triggered on component-versioned tag pushes (server-vX.Y.Z).
 # Builds the binary, generates an SBOM, and produces SLSA build provenance
 # and SBOM attestations signed via keyless Sigstore (OIDC).
-# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
 name: sigstore-sign
 
 on:
@@ -15,25 +14,27 @@ permissions:
 jobs:
   sign:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@v2
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
         with:
           go-version-file: server/go.mod
+          cache: false  # release pipeline: avoid cache poisoning into signed artifacts
 
       - name: Build
         working-directory: server
@@ -42,19 +43,19 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o ../dist/moldd ./cmd/moldd
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
           path: ./server
           format: spdx-json
           output-file: dist/moldd.spdx.json
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2
         with:
           subject-path: dist/moldd
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@v2
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b  # v2
         with:
           subject-path: dist/moldd
           sbom-path: dist/moldd.spdx.json

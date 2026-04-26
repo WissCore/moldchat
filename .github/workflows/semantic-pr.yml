@@ -1,7 +1,6 @@
 # Validates pull request titles against the Conventional Commits 1.0 spec.
 # The PR title becomes the squash-merge commit subject and must therefore be
 # parseable by release-please for version bump decisions.
-# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
 name: semantic-pr
 
 on:
@@ -11,17 +10,22 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@v2
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
         with:
           egress-policy: audit
 
       - name: Validate PR title
-        uses: amannn/action-semantic-pull-request@v5
+        uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825  # v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

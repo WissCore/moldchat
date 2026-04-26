@@ -59,3 +59,13 @@ jobs:
         with:
           subject-path: dist/moldd
           sbom-path: dist/moldd.spdx.json
+
+      - name: Upload artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            dist/moldd \
+            dist/moldd.spdx.json \
+            --repo "${{ github.repository }}" \
+            --clobber

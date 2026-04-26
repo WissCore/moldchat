@@ -29,4 +29,3 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          signoff: "Alan Wiss <alan@moldchat.com>"

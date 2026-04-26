@@ -12,20 +12,17 @@
     "server": {
       "release-type": "go",
       "package-name": "server",
-      "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0"
+      "changelog-path": "CHANGELOG.md"
     },
     "apps/android": {
       "release-type": "simple",
       "package-name": "android",
-      "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0"
+      "changelog-path": "CHANGELOG.md"
     },
     "apps/ios": {
       "release-type": "simple",
       "package-name": "ios",
-      "changelog-path": "CHANGELOG.md",
-      "release-as": "0.1.0"
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "changelog-sections": [

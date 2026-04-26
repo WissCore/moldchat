@@ -1,4 +1,7 @@
-# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live (post-tj-actions hardening).
+# NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
+# gitleaks is invoked via the binary installed by mise (the version is pinned in
+# .mise.toml + mise.lock), so the local pre-push hook and CI run the exact same
+# scanner with the exact same arguments.
 name: gitleaks
 
 on:
@@ -24,7 +27,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+
+      - name: Run gitleaks
+        run: gitleaks detect --redact -v

@@ -1,4 +1,7 @@
 # NOTE: actions are tag-pinned for readability; SHA-pin all `uses:` before going live.
+# osv-scanner is invoked via the binary installed by mise (the version is pinned in
+# .mise.toml + mise.lock), so the local pre-push hook and CI run the exact same
+# scanner with the exact same arguments.
 name: osv-scanner
 
 on:
@@ -14,13 +17,23 @@ permissions:
 
 jobs:
   scan:
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
-      actions: read
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2
-    with:
-      scan-args: |-
-        --recursive
-        --skip-git
-        ./
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+
+      - name: Run osv-scanner
+        run: osv-scanner scan source --recursive ./

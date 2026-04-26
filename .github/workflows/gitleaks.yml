@@ -40,4 +40,4 @@ jobs:
         run: mise install gitleaks
 
       - name: Run gitleaks
-        run: mise exec -- gitleaks detect --redact -v
+        run: mise x gitleaks -- gitleaks detect --redact -v

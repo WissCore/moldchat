@@ -5,6 +5,12 @@ set -euo pipefail
 
 msg_file="${1:?usage: check-dco.sh <commit-msg-file>}"
 
+# Skip merge commits — per Linux Foundation guidance, merge commits are not
+# "contributions" and do not require a separate DCO sign-off.
+if head -1 "$msg_file" | grep -qE '^Merge (branch|remote-tracking|pull request) '; then
+  exit 0
+fi
+
 if grep -qE '^Signed-off-by: .+ <.+@.+>$' "$msg_file"; then
   exit 0
 fi

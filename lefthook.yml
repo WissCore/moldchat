@@ -72,6 +72,10 @@ pre-push:
   commands:
     block-direct-push-to-main:
       run: |
+        # Allow the very first push (upstream not yet established).
+        if ! git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
+          exit 0
+        fi
         current=$(git rev-parse --abbrev-ref HEAD)
         if [ "$current" = "main" ]; then
           echo "Direct pushes to 'main' are blocked. Use a feature branch and open a pull request."
@@ -100,7 +104,7 @@ pre-push:
     gitleaks-full-history:
       run: gitleaks detect --redact -v
     osv-scanner:
-      run: osv-scanner scan source --recursive --skip-git ./
+      run: osv-scanner scan source --recursive ./
     addlicense-full-repo:
       run: |
         files=$(git ls-files '*.go')

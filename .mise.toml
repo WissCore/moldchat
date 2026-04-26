@@ -4,8 +4,8 @@
 [tools]
 go     = "1.26.2"
 java   = "temurin-21"
-kotlin = "2.1.0"
-node   = "22"
+kotlin = "2.3.21"
+node   = "22.22.2"
 shellcheck = "latest"
 
 # CLI helpers used in scripts and CI

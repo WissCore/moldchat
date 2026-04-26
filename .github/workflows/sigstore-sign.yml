@@ -56,7 +56,7 @@ jobs:
           subject-path: dist/moldd
 
       - name: Attest SBOM
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b  # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e  # v4
         with:
           subject-path: dist/moldd
           sbom-path: dist/moldd.spdx.json

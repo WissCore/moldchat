@@ -14,12 +14,26 @@ import (
 	"github.com/WissCore/moldchat/server/internal/storage/memory"
 )
 
-func TestCreateQueue_RejectsInvalidKey(t *testing.T) {
+func validKeys() queue.OwnerKeys {
+	return queue.OwnerKeys{
+		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
+	}
+}
+
+func TestCreateQueue_RejectsInvalidKeys(t *testing.T) {
 	t.Parallel()
 
 	s := memory.New()
-	if _, err := s.CreateQueue(context.Background(), make([]byte, 31)); !errors.Is(err, queue.ErrInvalidOwnerKey) {
-		t.Errorf("CreateQueue with 31-byte key: got %v, want ErrInvalidOwnerKey", err)
+
+	bad := queue.OwnerKeys{X25519Pub: make([]byte, 31), Ed25519Pub: make([]byte, 32)}
+	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidX25519Key) {
+		t.Errorf("31-byte X25519: got %v, want ErrInvalidX25519Key", err)
+	}
+
+	bad = queue.OwnerKeys{X25519Pub: make([]byte, 32), Ed25519Pub: make([]byte, 31)}
+	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidEd25519Key) {
+		t.Errorf("31-byte Ed25519: got %v, want ErrInvalidEd25519Key", err)
 	}
 }
 
@@ -28,7 +42,7 @@ func TestPutAndListMessages_RoundTrip(t *testing.T) {
 
 	s := memory.New()
 	ctx := context.Background()
-	q, err := s.CreateQueue(ctx, make([]byte, 32))
+	q, err := s.CreateQueue(ctx, validKeys())
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -56,7 +70,7 @@ func TestPutMessage_RejectsEmpty(t *testing.T) {
 
 	s := memory.New()
 	ctx := context.Background()
-	q, err := s.CreateQueue(ctx, make([]byte, 32))
+	q, err := s.CreateQueue(ctx, validKeys())
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -70,7 +84,7 @@ func TestPutMessage_RejectsTooLarge(t *testing.T) {
 
 	s := memory.New()
 	ctx := context.Background()
-	q, err := s.CreateQueue(ctx, make([]byte, 32))
+	q, err := s.CreateQueue(ctx, validKeys())
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -93,7 +107,7 @@ func TestListMessages_HasMore(t *testing.T) {
 
 	s := memory.New()
 	ctx := context.Background()
-	q, err := s.CreateQueue(ctx, make([]byte, 32))
+	q, err := s.CreateQueue(ctx, validKeys())
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -119,7 +133,7 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 
 	s := memory.New()
 	ctx := context.Background()
-	q, err := s.CreateQueue(ctx, make([]byte, 32))
+	q, err := s.CreateQueue(ctx, validKeys())
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}

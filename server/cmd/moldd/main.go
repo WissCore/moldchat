@@ -50,6 +50,12 @@ func main() {
 }
 
 func run() int {
+	// Tighten the file-creation mask so any database files SQLCipher
+	// later opens land at 0600. The encrypted-at-rest property covers
+	// content; this covers metadata access (ctime, mtime, size) plus the
+	// raw ciphertext as a defence-in-depth measure against local readers.
+	syscall.Umask(0o077)
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevelFromEnv()}))
 	slog.SetDefault(logger)
 

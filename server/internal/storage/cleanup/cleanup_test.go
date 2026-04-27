@@ -145,8 +145,9 @@ func TestTick_AgainstRealSQLiteStore(t *testing.T) {
 	if _, err := st.GetQueue(ctx, q.ID); !errors.Is(err, queue.ErrQueueNotFound) {
 		t.Errorf("queue still present after cleanup: %v", err)
 	}
-	// File on disk should be gone.
-	path := filepath.Join(dir, q.ID+".db")
+	// File on disk should be gone. Filenames are HMAC(seed, queueID),
+	// not the raw queue id.
+	path := filepath.Join(dir, seed.QueueFilename(q.ID)+".db")
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("queue db file still exists after cleanup: %v", statErr)
 	}

@@ -186,7 +186,7 @@ func (s *Server) handleListMessages() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if authErr := s.authorizeOwner(r, q); authErr != nil {
+		if authErr := s.authorizeOwner(r, q, ""); authErr != nil {
 			s.AuthFailureCount.Add(1)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -232,7 +232,7 @@ func (s *Server) handleDeleteMessage() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if authErr := s.authorizeOwner(r, q); authErr != nil {
+		if authErr := s.authorizeOwner(r, q, messageID); authErr != nil {
 			s.AuthFailureCount.Add(1)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -254,10 +254,13 @@ func (s *Server) handleDeleteMessage() http.Handler {
 
 // authorizeOwner verifies the Ed25519-Sig challenge-response in the
 // Authorization header against the queue's registered owner public key.
-// It returns nil on success and errAuthDenied for every failure mode;
-// the cause is intentionally collapsed so the response does not reveal
+// resourceID is the message identifier when present in the URL (DELETE)
+// and the empty string otherwise; it binds the signature to the
+// targeted resource without depending on the literal request path.
+// Returns nil on success and errAuthDenied for every failure mode; the
+// cause is intentionally collapsed so the response does not reveal
 // which check failed.
-func (s *Server) authorizeOwner(r *http.Request, q *queue.Queue) error {
+func (s *Server) authorizeOwner(r *http.Request, q *queue.Queue, resourceID string) error {
 	sig, pubkey, nonce, err := auth.ParseAuthorization(r.Header.Get("Authorization"))
 	if err != nil {
 		return errAuthDenied
@@ -275,7 +278,7 @@ func (s *Server) authorizeOwner(r *http.Request, q *queue.Queue) error {
 	if verifyErr := s.Auth.Verify(
 		ed25519.PublicKey(pubkey),
 		nonce, sig,
-		q.ID, r.Method, r.URL.Path,
+		q.ID, r.Method, resourceID,
 	); verifyErr != nil {
 		return errAuthDenied
 	}
@@ -296,8 +299,16 @@ func (s *Server) logServerError(op string, err error) {
 // is responsible for setting via slog.SetDefault — without that wiring
 // the message goes to the stdlib default handler at info level and is
 // silently dropped.
+//
+// Headers set:
+//   - Content-Type: application/json
+//   - X-Content-Type-Options: nosniff to forbid MIME sniffing on any
+//     response a user agent might decide to render. We never serve
+//     HTML from this endpoint, but the header is the standard OWASP
+//     defence and costs nothing.
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Default().Debug("response encode failed", "err", err.Error())

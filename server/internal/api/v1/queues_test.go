@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -126,14 +125,12 @@ func fetchNonce(t *testing.T, baseURL, queueID string) []byte {
 }
 
 // signedRequest builds a request authenticated with a fresh challenge.
-func signedRequest(t *testing.T, baseURL, queueID, method, target string, owner ownerCreds) *http.Request {
+// resourceID binds the signature to the targeted message id for DELETE
+// requests; pass empty string for list/auth-challenge.
+func signedRequest(t *testing.T, baseURL, queueID, method, target, resourceID string, owner ownerCreds) *http.Request {
 	t.Helper()
 	nonce := fetchNonce(t, baseURL, queueID)
-	u, err := url.Parse(baseURL + target)
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	payload := auth.CanonicalPayload(nonce, queueID, method, u.Path)
+	payload := auth.CanonicalPayload(nonce, queueID, method, resourceID)
 	sig := ed25519.Sign(owner.ed25519Pri, payload)
 
 	req, err := http.NewRequest(method, baseURL+target, nil)
@@ -207,7 +204,7 @@ func TestPutMessage_RoundTrip(t *testing.T) {
 	}
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", owner)
+		"/v1/queues/"+queueID+"/messages", "", owner)
 	getResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -279,7 +276,7 @@ func TestListMessages_Unauthorized(t *testing.T) {
 
 	intruder := newOwner(t)
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", intruder)
+		"/v1/queues/"+queueID+"/messages", "", intruder)
 	wrongResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
@@ -297,7 +294,7 @@ func TestListMessages_RejectsReplay(t *testing.T) {
 	queueID := createQueue(t, srv.URL, owner)
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", owner)
+		"/v1/queues/"+queueID+"/messages", "", owner)
 	first, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("first do: %v", err)
@@ -350,7 +347,7 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 	_ = putResp.Body.Close()
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodDelete,
-		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, puts.MessageID, owner)
 	delResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
@@ -380,7 +377,7 @@ func TestListMessages_RejectsTamperedMethod(t *testing.T) {
 
 	// Sign for GET, submit as DELETE.
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, puts.MessageID, owner)
 	req.Method = http.MethodDelete
 	req.URL.Path = "/v1/queues/" + queueID + "/messages/" + puts.MessageID
 

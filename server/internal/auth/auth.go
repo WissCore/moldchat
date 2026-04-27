@@ -11,9 +11,10 @@
 //     Server returns a fresh 32-byte nonce with a 30-second TTL.
 //  2. Client signs the canonical payload
 //     "moldd-v1-auth" || 0x00 || nonce || 0x00 || queue_id || 0x00 ||
-//     method || 0x00 || path
+//     method || 0x00 || resource_id
 //     using the Ed25519 private key whose public half was registered when
-//     the queue was created.
+//     the queue was created. resource_id is the message identifier for
+//     DELETE operations and the empty string for everything else.
 //  3. Client sends the request with header
 //     Authorization: ED25519-Sig <signature_b64>,<pubkey_b64>,<nonce_b64>
 //     The header format is comma-separated bare base64 fields rather than
@@ -23,6 +24,13 @@
 //  4. Server re-derives the canonical payload, checks the supplied pubkey
 //     matches the one registered with the queue (constant-time), verifies
 //     the signature, and burns the nonce so it cannot be replayed.
+//
+// The signed payload deliberately omits the URL path: HTTP intermediaries
+// (Cloudflare, reverse proxies, the Xray frontend) routinely re-normalise
+// trailing slashes, percent-encoding, and dot segments, which would cause
+// signatures to mismatch through no fault of the client. The triple of
+// (queue_id, method, resource_id) uniquely identifies the protected
+// operation without depending on the literal request path.
 //
 // The nonce store is in-memory, has a hard cap on outstanding entries,
 // and is GCed lazily on each Issue call.
@@ -117,11 +125,11 @@ func (i *Issuer) Issue() (nonce []byte, expiresAt time.Time, err error) {
 }
 
 // Verify checks the signature against pubkey for the canonical payload
-// derived from (nonce, queueID, method, path). On success the nonce is
-// burned so subsequent calls return ErrReplay. The nonce is also burned
-// on signature failure: a single nonce must never authorise more than
-// one verification attempt, regardless of outcome.
-func (i *Issuer) Verify(pubkey ed25519.PublicKey, nonce, sig []byte, queueID, method, path string) error {
+// derived from (nonce, queueID, method, resourceID). On success the
+// nonce is burned so subsequent calls return ErrReplay. The nonce is
+// also burned on signature failure: a single nonce must never authorise
+// more than one verification attempt, regardless of outcome.
+func (i *Issuer) Verify(pubkey ed25519.PublicKey, nonce, sig []byte, queueID, method, resourceID string) error {
 	if len(pubkey) != ed25519.PublicKeySize {
 		return ErrSignatureInvalid
 	}
@@ -144,7 +152,7 @@ func (i *Issuer) Verify(pubkey ed25519.PublicKey, nonce, sig []byte, queueID, me
 		return ErrReplay
 	}
 
-	payload := canonicalPayload(nonce, queueID, method, path)
+	payload := canonicalPayload(nonce, queueID, method, resourceID)
 	if !ed25519.Verify(pubkey, payload, sig) {
 		delete(i.issued, string(nonce))
 		return ErrSignatureInvalid
@@ -155,8 +163,8 @@ func (i *Issuer) Verify(pubkey ed25519.PublicKey, nonce, sig []byte, queueID, me
 
 // canonicalPayload returns the bytes that must be signed by the client.
 // The format is documented at the top of this package.
-func canonicalPayload(nonce []byte, queueID, method, path string) []byte {
-	out := make([]byte, 0, len(domainTag)+1+len(nonce)+1+len(queueID)+1+len(method)+1+len(path))
+func canonicalPayload(nonce []byte, queueID, method, resourceID string) []byte {
+	out := make([]byte, 0, len(domainTag)+1+len(nonce)+1+len(queueID)+1+len(method)+1+len(resourceID))
 	out = append(out, domainTag...)
 	out = append(out, separator)
 	out = append(out, nonce...)
@@ -165,14 +173,16 @@ func canonicalPayload(nonce []byte, queueID, method, path string) []byte {
 	out = append(out, separator)
 	out = append(out, method...)
 	out = append(out, separator)
-	out = append(out, path...)
+	out = append(out, resourceID...)
 	return out
 }
 
 // CanonicalPayload exposes the canonical signing payload for clients and
 // integration tests. Callers should not mutate the returned slice.
-func CanonicalPayload(nonce []byte, queueID, method, path string) []byte {
-	return canonicalPayload(nonce, queueID, method, path)
+// resourceID is the message identifier for DELETE operations and the
+// empty string otherwise.
+func CanonicalPayload(nonce []byte, queueID, method, resourceID string) []byte {
+	return canonicalPayload(nonce, queueID, method, resourceID)
 }
 
 // ParseAuthorization parses an "ED25519-Sig <sig_b64>,<pubkey_b64>,<nonce_b64>"

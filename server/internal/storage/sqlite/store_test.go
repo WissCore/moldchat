@@ -21,7 +21,7 @@ import (
 	_ "github.com/mutecomm/go-sqlcipher/v4"
 )
 
-func newTestStore(t *testing.T) (*sqlite.Store, string) {
+func newTestStore(t *testing.T) (*sqlite.Store, sqlite.MasterSeed, string) {
 	t.Helper()
 
 	var seed sqlite.MasterSeed
@@ -34,7 +34,7 @@ func newTestStore(t *testing.T) (*sqlite.Store, string) {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return st, dir
+	return st, seed, dir
 }
 
 func ownerKeys(t *testing.T) queue.OwnerKeys {
@@ -74,7 +74,7 @@ func TestNew_CreatesDataDir(t *testing.T) {
 
 func TestCreateAndPutAndList_RoundTrip(t *testing.T) {
 	t.Parallel()
-	st, _ := newTestStore(t)
+	st, _, _ := newTestStore(t)
 	ctx := context.Background()
 
 	q, err := st.CreateQueue(ctx, ownerKeys(t))
@@ -176,7 +176,7 @@ func TestEncryptionAtRest_DBFileIsOpaque(t *testing.T) {
 
 func TestPutMessage_QueueNotFound(t *testing.T) {
 	t.Parallel()
-	st, _ := newTestStore(t)
+	st, _, _ := newTestStore(t)
 
 	if _, err := st.PutMessage(context.Background(), "missing-queue-id", []byte("x")); !errors.Is(err, queue.ErrQueueNotFound) {
 		t.Errorf("got %v, want ErrQueueNotFound", err)
@@ -185,7 +185,7 @@ func TestPutMessage_QueueNotFound(t *testing.T) {
 
 func TestPutMessage_RejectsTooLargeAndEmpty(t *testing.T) {
 	t.Parallel()
-	st, _ := newTestStore(t)
+	st, _, _ := newTestStore(t)
 	ctx := context.Background()
 	q, err := st.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
@@ -201,7 +201,7 @@ func TestPutMessage_RejectsTooLargeAndEmpty(t *testing.T) {
 
 func TestDeleteMessage_RoundTrip(t *testing.T) {
 	t.Parallel()
-	st, _ := newTestStore(t)
+	st, _, _ := newTestStore(t)
 	ctx := context.Background()
 
 	q, err := st.CreateQueue(ctx, ownerKeys(t))
@@ -229,7 +229,7 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 
 func TestExpiredAndDeleteQueue(t *testing.T) {
 	t.Parallel()
-	st, dir := newTestStore(t)
+	st, seed, dir := newTestStore(t)
 	ctx := context.Background()
 
 	q, err := st.CreateQueue(ctx, ownerKeys(t))
@@ -247,7 +247,8 @@ func TestExpiredAndDeleteQueue(t *testing.T) {
 	if err := st.DeleteQueue(ctx, q.ID); err != nil {
 		t.Fatalf("DeleteQueue: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, q.ID+".db")); !errors.Is(err, os.ErrNotExist) {
+	queuePath := filepath.Join(dir, seed.QueueFilename(q.ID)+".db")
+	if _, err := os.Stat(queuePath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("queue file still exists: %v", err)
 	}
 	if _, err := st.GetQueue(ctx, q.ID); !errors.Is(err, queue.ErrQueueNotFound) {

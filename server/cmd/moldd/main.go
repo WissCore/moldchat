@@ -4,9 +4,10 @@
 
 // Command moldd is the MoldChat relay server.
 //
-// In its current form it only exposes a liveness endpoint; the queue, sealed
-// envelope routing, and anti-spam layers are added in subsequent development
-// steps.
+// The current build exposes a queue HTTP API backed by in-memory storage and
+// authorises owners by constant-time comparison against the public key
+// supplied at queue creation. Sealed-sender routing, persistence, anti-spam,
+// and key transparency are not implemented yet.
 package main
 
 import (
@@ -19,11 +20,13 @@ import (
 	"syscall"
 	"time"
 
+	v1 "github.com/WissCore/moldchat/server/internal/api/v1"
 	"github.com/WissCore/moldchat/server/internal/health"
+	"github.com/WissCore/moldchat/server/internal/storage/memory"
 )
 
 const (
-	defaultAddr       = ":8443"
+	defaultAddr       = ":8080"
 	readHeaderTimeout = 10 * time.Second
 	shutdownTimeout   = 5 * time.Second
 )
@@ -42,6 +45,12 @@ func run() int {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
+
+	api := &v1.Server{
+		Storage: memory.New(),
+		Logger:  logger,
+	}
+	api.Mount(mux)
 
 	srv := &http.Server{
 		Addr:              addr,

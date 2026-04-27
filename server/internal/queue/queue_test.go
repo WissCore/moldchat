@@ -5,6 +5,7 @@
 package queue_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/WissCore/moldchat/server/internal/queue"
@@ -41,16 +42,30 @@ func TestNewMessageID_Length(t *testing.T) {
 	}
 }
 
-func TestValidateOwnerKey(t *testing.T) {
+func TestValidateOwnerKeys(t *testing.T) {
 	t.Parallel()
 
-	if err := queue.ValidateOwnerKey(make([]byte, 32)); err != nil {
-		t.Errorf("32-byte key rejected: %v", err)
+	good := queue.OwnerKeys{
+		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
-	if err := queue.ValidateOwnerKey(make([]byte, 31)); err == nil {
-		t.Error("31-byte key was not rejected")
+	if err := queue.ValidateOwnerKeys(good); err != nil {
+		t.Errorf("valid pair rejected: %v", err)
 	}
-	if err := queue.ValidateOwnerKey(nil); err == nil {
-		t.Error("nil key was not rejected")
+
+	shortX := good
+	shortX.X25519Pub = make([]byte, 31)
+	if err := queue.ValidateOwnerKeys(shortX); !errors.Is(err, queue.ErrInvalidX25519Key) {
+		t.Errorf("short X25519: got %v, want ErrInvalidX25519Key", err)
+	}
+
+	shortEd := good
+	shortEd.Ed25519Pub = make([]byte, 31)
+	if err := queue.ValidateOwnerKeys(shortEd); !errors.Is(err, queue.ErrInvalidEd25519Key) {
+		t.Errorf("short Ed25519: got %v, want ErrInvalidEd25519Key", err)
+	}
+
+	if err := queue.ValidateOwnerKeys(queue.OwnerKeys{}); !errors.Is(err, queue.ErrInvalidX25519Key) {
+		t.Errorf("empty pair: got %v, want ErrInvalidX25519Key", err)
 	}
 }

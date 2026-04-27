@@ -33,9 +33,9 @@ func New() *Storage {
 	}
 }
 
-// CreateQueue registers a new queue owned by the given key.
-func (s *Storage) CreateQueue(_ context.Context, ownerKey []byte) (*queue.Queue, error) {
-	if err := queue.ValidateOwnerKey(ownerKey); err != nil {
+// CreateQueue registers a new queue owned by the given key pair.
+func (s *Storage) CreateQueue(_ context.Context, keys queue.OwnerKeys) (*queue.Queue, error) {
+	if err := queue.ValidateOwnerKeys(keys); err != nil {
 		return nil, err
 	}
 	id, err := queue.NewID()
@@ -44,11 +44,12 @@ func (s *Storage) CreateQueue(_ context.Context, ownerKey []byte) (*queue.Queue,
 	}
 	now := time.Now().UTC()
 	q := &queue.Queue{
-		ID:         id,
-		OwnerKey:   append([]byte(nil), ownerKey...),
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(queue.DefaultTTL),
-		LastAccess: now,
+		ID:              id,
+		OwnerX25519Pub:  append([]byte(nil), keys.X25519Pub...),
+		OwnerEd25519Pub: append([]byte(nil), keys.Ed25519Pub...),
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(queue.DefaultTTL),
+		LastAccess:      now,
 	}
 	s.mu.Lock()
 	s.queues[id] = q
@@ -150,7 +151,8 @@ func (s *Storage) DeleteMessage(_ context.Context, queueID, messageID string) er
 
 func cloneQueue(q *queue.Queue) *queue.Queue {
 	cp := *q
-	cp.OwnerKey = append([]byte(nil), q.OwnerKey...)
+	cp.OwnerX25519Pub = append([]byte(nil), q.OwnerX25519Pub...)
+	cp.OwnerEd25519Pub = append([]byte(nil), q.OwnerEd25519Pub...)
 	return &cp
 }
 

@@ -68,20 +68,23 @@ func (s *Store) Close() error { return s.masterDB.Close() }
 
 const masterSchema = `
 CREATE TABLE IF NOT EXISTS queues (
-	id           TEXT    PRIMARY KEY,
-	owner_key    BLOB    NOT NULL,
-	created_at   INTEGER NOT NULL,
-	expires_at   INTEGER NOT NULL,
-	last_access  INTEGER NOT NULL
+	id                 TEXT    NOT NULL,
+	owner_x25519_pub   BLOB    NOT NULL,
+	owner_ed25519_pub  BLOB    NOT NULL,
+	created_at         INTEGER NOT NULL,
+	expires_at         INTEGER NOT NULL,
+	last_access        INTEGER NOT NULL,
+	PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_queues_expires_at ON queues(expires_at);
 `
 
 const queueSchema = `
 CREATE TABLE IF NOT EXISTS messages (
-	id           TEXT    PRIMARY KEY,
+	id           TEXT    NOT NULL,
 	blob         BLOB    NOT NULL,
-	received_at  INTEGER NOT NULL
+	received_at  INTEGER NOT NULL,
+	PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at);
 `
@@ -122,8 +125,8 @@ func (s *Store) openQueue(queueID string) (*sql.DB, error) {
 }
 
 // CreateQueue inserts a new queue row and creates its per-queue database file.
-func (s *Store) CreateQueue(ctx context.Context, ownerKey []byte) (*queue.Queue, error) {
-	if err := queue.ValidateOwnerKey(ownerKey); err != nil {
+func (s *Store) CreateQueue(ctx context.Context, keys queue.OwnerKeys) (*queue.Queue, error) {
+	if err := queue.ValidateOwnerKeys(keys); err != nil {
 		return nil, err
 	}
 	id, err := queue.NewID()
@@ -138,8 +141,8 @@ func (s *Store) CreateQueue(ctx context.Context, ownerKey []byte) (*queue.Queue,
 	defer s.mu.Unlock()
 
 	if _, execErr := s.masterDB.ExecContext(ctx,
-		`INSERT INTO queues(id, owner_key, created_at, expires_at, last_access) VALUES (?, ?, ?, ?, ?)`,
-		id, ownerKey, now.UnixNano(), expires.UnixNano(), now.UnixNano(),
+		`INSERT INTO queues(id, owner_x25519_pub, owner_ed25519_pub, created_at, expires_at, last_access) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, keys.X25519Pub, keys.Ed25519Pub, now.UnixNano(), expires.UnixNano(), now.UnixNano(),
 	); execErr != nil {
 		return nil, fmt.Errorf("insert queue: %w", execErr)
 	}
@@ -153,11 +156,12 @@ func (s *Store) CreateQueue(ctx context.Context, ownerKey []byte) (*queue.Queue,
 	_ = qdb.Close()
 
 	return &queue.Queue{
-		ID:         id,
-		OwnerKey:   append([]byte(nil), ownerKey...),
-		CreatedAt:  now,
-		ExpiresAt:  expires,
-		LastAccess: now,
+		ID:              id,
+		OwnerX25519Pub:  append([]byte(nil), keys.X25519Pub...),
+		OwnerEd25519Pub: append([]byte(nil), keys.Ed25519Pub...),
+		CreatedAt:       now,
+		ExpiresAt:       expires,
+		LastAccess:      now,
 	}, nil
 }
 
@@ -174,9 +178,9 @@ func (s *Store) getQueueLocked(ctx context.Context, id string) (*queue.Queue, er
 		createdNs, expiresNs, lastAccess int64
 	)
 	row := s.masterDB.QueryRowContext(ctx,
-		`SELECT id, owner_key, created_at, expires_at, last_access FROM queues WHERE id = ?`, id,
+		`SELECT id, owner_x25519_pub, owner_ed25519_pub, created_at, expires_at, last_access FROM queues WHERE id = ?`, id,
 	)
-	if err := row.Scan(&q.ID, &q.OwnerKey, &createdNs, &expiresNs, &lastAccess); err != nil {
+	if err := row.Scan(&q.ID, &q.OwnerX25519Pub, &q.OwnerEd25519Pub, &createdNs, &expiresNs, &lastAccess); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, queue.ErrQueueNotFound
 		}

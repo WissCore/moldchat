@@ -37,13 +37,19 @@ func newTestStore(t *testing.T) (*sqlite.Store, string) {
 	return st, dir
 }
 
-func ownerKey(t *testing.T) []byte {
+func ownerKeys(t *testing.T) queue.OwnerKeys {
 	t.Helper()
-	k := make([]byte, queue.OwnerKeyBytes)
-	if _, err := rand.Read(k); err != nil {
-		t.Fatalf("rand: %v", err)
+	keys := queue.OwnerKeys{
+		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
-	return k
+	if _, err := rand.Read(keys.X25519Pub); err != nil {
+		t.Fatalf("rand x25519: %v", err)
+	}
+	if _, err := rand.Read(keys.Ed25519Pub); err != nil {
+		t.Fatalf("rand ed25519: %v", err)
+	}
+	return keys
 }
 
 func TestNew_CreatesDataDir(t *testing.T) {
@@ -71,7 +77,7 @@ func TestCreateAndPutAndList_RoundTrip(t *testing.T) {
 	st, _ := newTestStore(t)
 	ctx := context.Background()
 
-	q, err := st.CreateQueue(ctx, ownerKey(t))
+	q, err := st.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -108,7 +114,7 @@ func TestDurability_AcrossRestart(t *testing.T) {
 		t.Fatalf("first New: %v", err)
 	}
 	ctx := context.Background()
-	q, err := first.CreateQueue(ctx, ownerKey(t))
+	q, err := first.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -148,7 +154,7 @@ func TestEncryptionAtRest_DBFileIsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, createErr := st.CreateQueue(context.Background(), ownerKey(t)); createErr != nil {
+	if _, createErr := st.CreateQueue(context.Background(), ownerKeys(t)); createErr != nil {
 		t.Fatalf("CreateQueue: %v", createErr)
 	}
 	if closeErr := st.Close(); closeErr != nil {
@@ -181,7 +187,7 @@ func TestPutMessage_RejectsTooLargeAndEmpty(t *testing.T) {
 	t.Parallel()
 	st, _ := newTestStore(t)
 	ctx := context.Background()
-	q, err := st.CreateQueue(ctx, ownerKey(t))
+	q, err := st.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -198,7 +204,7 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 	st, _ := newTestStore(t)
 	ctx := context.Background()
 
-	q, err := st.CreateQueue(ctx, ownerKey(t))
+	q, err := st.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
@@ -226,7 +232,7 @@ func TestExpiredAndDeleteQueue(t *testing.T) {
 	st, dir := newTestStore(t)
 	ctx := context.Background()
 
-	q, err := st.CreateQueue(ctx, ownerKey(t))
+	q, err := st.CreateQueue(ctx, ownerKeys(t))
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}

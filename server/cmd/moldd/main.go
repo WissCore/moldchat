@@ -22,6 +22,7 @@ import (
 	"time"
 
 	v1 "github.com/WissCore/moldchat/server/internal/api/v1"
+	"github.com/WissCore/moldchat/server/internal/auth"
 	"github.com/WissCore/moldchat/server/internal/health"
 	"github.com/WissCore/moldchat/server/internal/storage"
 	"github.com/WissCore/moldchat/server/internal/storage/cleanup"
@@ -53,7 +54,7 @@ func run() int {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
 
-	api := &v1.Server{Storage: store, Logger: logger}
+	api := &v1.Server{Storage: store, Auth: auth.NewIssuer(), Logger: logger}
 	api.Mount(mux)
 
 	srv := &http.Server{

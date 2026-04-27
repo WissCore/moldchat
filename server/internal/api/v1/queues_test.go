@@ -6,36 +6,57 @@ package v1_test
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	v1 "github.com/WissCore/moldchat/server/internal/api/v1"
+	"github.com/WissCore/moldchat/server/internal/auth"
 	"github.com/WissCore/moldchat/server/internal/queue"
 	"github.com/WissCore/moldchat/server/internal/storage/memory"
 )
 
-func newTestServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	(&v1.Server{Storage: memory.New()}).Mount(mux)
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+type ownerCreds struct {
+	x25519Pub  []byte
+	ed25519Pub ed25519.PublicKey
+	ed25519Pri ed25519.PrivateKey
 }
 
-func randomOwnerKey(t *testing.T) (raw []byte, b64 string) {
+// testServer pairs the underlying *v1.Server with its httptest fixture so
+// tests can both hit the API and observe internal counters.
+type testServer struct {
+	*httptest.Server
+	api *v1.Server
+}
+
+func newTestServer(t *testing.T) *testServer {
 	t.Helper()
-	raw = make([]byte, queue.OwnerKeyBytes)
-	if _, err := rand.Read(raw); err != nil {
-		t.Fatalf("rand: %v", err)
+	mux := http.NewServeMux()
+	api := &v1.Server{Storage: memory.New(), Auth: auth.NewIssuer()}
+	api.Mount(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return &testServer{Server: srv, api: api}
+}
+
+func newOwner(t *testing.T) ownerCreds {
+	t.Helper()
+	x := make([]byte, queue.X25519PubKeyBytes)
+	if _, err := rand.Read(x); err != nil {
+		t.Fatalf("rand x25519: %v", err)
 	}
-	return raw, base64.StdEncoding.EncodeToString(raw)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519: %v", err)
+	}
+	return ownerCreds{x25519Pub: x, ed25519Pub: pub, ed25519Pri: priv}
 }
 
 func decodeJSON(t *testing.T, body io.Reader, dst any) {
@@ -60,10 +81,14 @@ func putBlob(t *testing.T, url string, body io.Reader) *http.Response {
 	return resp
 }
 
-func createQueue(t *testing.T, baseURL, ownerB64 string) string {
+func createQueue(t *testing.T, baseURL string, owner ownerCreds) string {
 	t.Helper()
-	resp, err := http.Post(baseURL+"/v1/queues", "application/json",
-		strings.NewReader(`{"owner_pubkey":"`+ownerB64+`"}`))
+	body := map[string]string{
+		"owner_x25519_pubkey":  base64.StdEncoding.EncodeToString(owner.x25519Pub),
+		"owner_ed25519_pubkey": base64.StdEncoding.EncodeToString(owner.ed25519Pub),
+	}
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(baseURL+"/v1/queues", "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("create queue: %v", err)
 	}
@@ -78,13 +103,58 @@ func createQueue(t *testing.T, baseURL, ownerB64 string) string {
 	return got.QueueID
 }
 
+// fetchNonce calls GET /auth-challenge and returns the raw nonce bytes.
+func fetchNonce(t *testing.T, baseURL, queueID string) []byte {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/queues/" + queueID + "/auth-challenge")
+	if err != nil {
+		t.Fatalf("auth-challenge: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("auth-challenge status: %d", resp.StatusCode)
+	}
+	var got struct {
+		Nonce string `json:"nonce"`
+	}
+	decodeJSON(t, resp.Body, &got)
+	nonce, err := base64.StdEncoding.DecodeString(got.Nonce)
+	if err != nil {
+		t.Fatalf("decode nonce: %v", err)
+	}
+	return nonce
+}
+
+// signedRequest builds a request authenticated with a fresh challenge.
+func signedRequest(t *testing.T, baseURL, queueID, method, target string, owner ownerCreds) *http.Request {
+	t.Helper()
+	nonce := fetchNonce(t, baseURL, queueID)
+	u, err := url.Parse(baseURL + target)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	payload := auth.CanonicalPayload(nonce, queueID, method, u.Path)
+	sig := ed25519.Sign(owner.ed25519Pri, payload)
+
+	req, err := http.NewRequest(method, baseURL+target, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", auth.FormatAuthorization(sig, owner.ed25519Pub, nonce))
+	return req
+}
+
 func TestCreateQueue_Happy(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
-	_, b64 := randomOwnerKey(t)
+	owner := newOwner(t)
 
-	resp, err := http.Post(srv.URL+"/v1/queues", "application/json",
-		strings.NewReader(`{"owner_pubkey":"`+b64+`"}`))
+	body := map[string]string{
+		"owner_x25519_pubkey":  base64.StdEncoding.EncodeToString(owner.x25519Pub),
+		"owner_ed25519_pubkey": base64.StdEncoding.EncodeToString(owner.ed25519Pub),
+	}
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(srv.URL+"/v1/queues", "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -107,8 +177,12 @@ func TestCreateQueue_InvalidKeyLength(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
 
-	body := strings.NewReader(`{"owner_pubkey":"` + base64.StdEncoding.EncodeToString([]byte("short")) + `"}`)
-	resp, err := http.Post(srv.URL+"/v1/queues", "application/json", body)
+	body := map[string]string{
+		"owner_x25519_pubkey":  base64.StdEncoding.EncodeToString([]byte("short")),
+		"owner_ed25519_pubkey": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	}
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(srv.URL+"/v1/queues", "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -122,8 +196,8 @@ func TestCreateQueue_InvalidKeyLength(t *testing.T) {
 func TestPutMessage_RoundTrip(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
-	rawKey, b64 := randomOwnerKey(t)
-	queueID := createQueue(t, srv.URL, b64)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
 
 	blob := []byte("opaque-blob-content")
 	putResp := putBlob(t, srv.URL+"/v1/queues/"+queueID+"/messages", bytes.NewReader(blob))
@@ -132,11 +206,8 @@ func TestPutMessage_RoundTrip(t *testing.T) {
 		t.Fatalf("PUT status: got %d, want 202", putResp.StatusCode)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/queues/"+queueID+"/messages", nil)
-	if err != nil {
-		t.Fatalf("new get: %v", err)
-	}
-	req.Header.Set("X-Owner-Pubkey", base64.StdEncoding.EncodeToString(rawKey))
+	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
+		"/v1/queues/"+queueID+"/messages", owner)
 	getResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -180,8 +251,8 @@ func TestPutMessage_QueueNotFound(t *testing.T) {
 func TestPutMessage_TooLarge(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
-	_, b64 := randomOwnerKey(t)
-	queueID := createQueue(t, srv.URL, b64)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
 
 	resp := putBlob(t, srv.URL+"/v1/queues/"+queueID+"/messages",
 		bytes.NewReader(make([]byte, queue.MaxBlobSize+1)))
@@ -194,39 +265,82 @@ func TestPutMessage_TooLarge(t *testing.T) {
 func TestListMessages_Unauthorized(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
-	_, b64 := randomOwnerKey(t)
-	queueID := createQueue(t, srv.URL, b64)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
 
-	noKeyResp, err := http.Get(srv.URL + "/v1/queues/" + queueID + "/messages")
+	noAuthResp, err := http.Get(srv.URL + "/v1/queues/" + queueID + "/messages")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	defer func() { _ = noKeyResp.Body.Close() }()
-	if noKeyResp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("no auth: got %d, want 401", noKeyResp.StatusCode)
+	defer func() { _ = noAuthResp.Body.Close() }()
+	if noAuthResp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("no auth: got %d, want 401", noAuthResp.StatusCode)
 	}
 
-	wrongKey, _ := randomOwnerKey(t)
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/queues/"+queueID+"/messages", nil)
-	if err != nil {
-		t.Fatalf("new get: %v", err)
-	}
-	req.Header.Set("X-Owner-Pubkey", base64.StdEncoding.EncodeToString(wrongKey))
-	wrongKeyResp, err := http.DefaultClient.Do(req)
+	intruder := newOwner(t)
+	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
+		"/v1/queues/"+queueID+"/messages", intruder)
+	wrongResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	defer func() { _ = wrongKeyResp.Body.Close() }()
-	if wrongKeyResp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("wrong key: got %d, want 401", wrongKeyResp.StatusCode)
+	defer func() { _ = wrongResp.Body.Close() }()
+	if wrongResp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("wrong key: got %d, want 401", wrongResp.StatusCode)
+	}
+}
+
+func TestListMessages_RejectsReplay(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
+
+	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
+		"/v1/queues/"+queueID+"/messages", owner)
+	first, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("first do: %v", err)
+	}
+	_ = first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first status: %d", first.StatusCode)
+	}
+
+	// Same Authorization header, second time should be rejected.
+	replay, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/queues/"+queueID+"/messages", nil)
+	if err != nil {
+		t.Fatalf("new replay: %v", err)
+	}
+	replay.Header.Set("Authorization", req.Header.Get("Authorization"))
+	replayResp, err := http.DefaultClient.Do(replay)
+	if err != nil {
+		t.Fatalf("replay do: %v", err)
+	}
+	defer func() { _ = replayResp.Body.Close() }()
+	if replayResp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("replay status: got %d, want 401", replayResp.StatusCode)
+	}
+}
+
+func TestAuthChallenge_QueueNotFound(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+	resp, err := http.Get(srv.URL + "/v1/queues/MISSING/auth-challenge")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d, want 404", resp.StatusCode)
 	}
 }
 
 func TestDeleteMessage_RoundTrip(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t)
-	rawKey, b64 := randomOwnerKey(t)
-	queueID := createQueue(t, srv.URL, b64)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
 
 	putResp := putBlob(t, srv.URL+"/v1/queues/"+queueID+"/messages", strings.NewReader("payload"))
 	var puts struct {
@@ -235,11 +349,8 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 	decodeJSON(t, putResp.Body, &puts)
 	_ = putResp.Body.Close()
 
-	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/v1/queues/"+queueID+"/messages/"+puts.MessageID, nil)
-	if err != nil {
-		t.Fatalf("new delete: %v", err)
-	}
-	req.Header.Set("X-Owner-Pubkey", base64.StdEncoding.EncodeToString(rawKey))
+	req := signedRequest(t, srv.URL, queueID, http.MethodDelete,
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
 	delResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
@@ -247,5 +358,94 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 	defer func() { _ = delResp.Body.Close() }()
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE status: got %d, want 204", delResp.StatusCode)
+	}
+}
+
+// TestListMessages_RejectsTamperedMethod proves that a signature produced
+// for one HTTP method cannot authorise another. The client signs payload
+// with method GET, then submits the signed Authorization header on a
+// DELETE request; the server must reject it.
+func TestListMessages_RejectsTamperedMethod(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
+
+	putResp := putBlob(t, srv.URL+"/v1/queues/"+queueID+"/messages", strings.NewReader("payload"))
+	var puts struct {
+		MessageID string `json:"message_id"`
+	}
+	decodeJSON(t, putResp.Body, &puts)
+	_ = putResp.Body.Close()
+
+	// Sign for GET, submit as DELETE.
+	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
+	req.Method = http.MethodDelete
+	req.URL.Path = "/v1/queues/" + queueID + "/messages/" + puts.MessageID
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want 401", resp.StatusCode)
+	}
+}
+
+// TestListMessages_MalformedAuthorizationHeader covers the API-level
+// surface for headers that don't even parse: garbage, wrong scheme,
+// invalid base64. All must collapse to 401 (not 400) so we don't leak
+// which validation step rejected the request.
+func TestListMessages_MalformedAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
+
+	cases := []string{
+		"garbage",
+		"Bearer abc",
+		"ED25519-Sig only-one-part",
+		"ED25519-Sig !!!,!!!,!!!",
+	}
+	for _, header := range cases {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/queues/"+queueID+"/messages", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			req.Header.Set("Authorization", header)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("got %d, want 401", resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestAuthFailureCount_BumpsOnDenial verifies the server-side aggregate
+// counter is incremented on auth failure.
+func TestAuthFailureCount_BumpsOnDenial(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+	owner := newOwner(t)
+	queueID := createQueue(t, srv.URL, owner)
+
+	before := srv.api.AuthFailureCount.Load()
+	resp, err := http.Get(srv.URL + "/v1/queues/" + queueID + "/messages")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if got := srv.api.AuthFailureCount.Load(); got != before+1 {
+		t.Errorf("counter: got %d, want %d", got, before+1)
 	}
 }

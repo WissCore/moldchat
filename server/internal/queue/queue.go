@@ -10,10 +10,13 @@
 package queue
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base32"
 	"errors"
 	"time"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 // Sizing and limits for queues and messages.
@@ -21,28 +24,40 @@ const (
 	queueIDBytes   = 20
 	messageIDBytes = 16
 
-	OwnerKeyBytes = 32
-	DefaultTTL    = 24 * time.Hour
-	MaxBlobSize   = 64 * 1024
+	X25519PubKeyBytes  = curve25519.PointSize
+	Ed25519PubKeyBytes = ed25519.PublicKeySize
+	DefaultTTL         = 24 * time.Hour
+	MaxBlobSize        = 64 * 1024
 )
 
 // Sentinel errors returned by the storage and API layers.
 var (
-	ErrQueueNotFound   = errors.New("queue not found")
-	ErrMessageNotFound = errors.New("message not found")
-	ErrUnauthorized    = errors.New("unauthorized")
-	ErrBlobTooLarge    = errors.New("blob exceeds maximum size")
-	ErrEmptyBlob       = errors.New("blob is empty")
-	ErrInvalidOwnerKey = errors.New("owner key must be 32 bytes")
+	ErrQueueNotFound     = errors.New("queue not found")
+	ErrMessageNotFound   = errors.New("message not found")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrBlobTooLarge      = errors.New("blob exceeds maximum size")
+	ErrEmptyBlob         = errors.New("blob is empty")
+	ErrInvalidX25519Key  = errors.New("x25519 public key must be 32 bytes")
+	ErrInvalidEd25519Key = errors.New("ed25519 public key must be 32 bytes")
 )
+
+// OwnerKeys is the pair of public keys registered with a queue at creation
+// time. X25519Pub is reserved for future Diffie-Hellman use (sealed-sender,
+// per-queue ECDH); Ed25519Pub authenticates owner-only operations through a
+// challenge-response signature.
+type OwnerKeys struct {
+	X25519Pub  []byte
+	Ed25519Pub []byte
+}
 
 // Queue is the metadata for an opaque message mailbox.
 type Queue struct {
-	ID         string
-	OwnerKey   []byte
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	LastAccess time.Time
+	ID              string
+	OwnerX25519Pub  []byte
+	OwnerEd25519Pub []byte
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+	LastAccess      time.Time
 }
 
 // Message is a single blob stored in a queue.
@@ -70,10 +85,14 @@ func generateID(n int) (string, error) {
 	return idEncoding.EncodeToString(buf), nil
 }
 
-// ValidateOwnerKey rejects keys whose length differs from OwnerKeyBytes.
-func ValidateOwnerKey(key []byte) error {
-	if len(key) != OwnerKeyBytes {
-		return ErrInvalidOwnerKey
+// ValidateOwnerKeys rejects key pairs whose lengths do not match the
+// expected sizes for X25519 and Ed25519 public keys.
+func ValidateOwnerKeys(k OwnerKeys) error {
+	if len(k.X25519Pub) != X25519PubKeyBytes {
+		return ErrInvalidX25519Key
+	}
+	if len(k.Ed25519Pub) != Ed25519PubKeyBytes {
+		return ErrInvalidEd25519Key
 	}
 	return nil
 }

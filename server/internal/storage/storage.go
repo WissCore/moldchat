@@ -19,7 +19,7 @@ import (
 //
 // All methods are expected to be safe for concurrent use.
 type Storage interface {
-	CreateQueue(ctx context.Context, ownerKey []byte) (*queue.Queue, error)
+	CreateQueue(ctx context.Context, keys queue.OwnerKeys) (*queue.Queue, error)
 	GetQueue(ctx context.Context, id string) (*queue.Queue, error)
 	PutMessage(ctx context.Context, queueID string, blob []byte) (*queue.Message, error)
 	ListMessages(ctx context.Context, queueID string, limit int) (msgs []*queue.Message, hasMore bool, err error)

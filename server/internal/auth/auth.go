@@ -163,6 +163,18 @@ func (i *Issuer) Verify(pubkey ed25519.PublicKey, nonce, sig []byte, queueID, me
 
 // canonicalPayload returns the bytes that must be signed by the client.
 // The format is documented at the top of this package.
+//
+// Framing invariant: the 0x00 separator only yields an unambiguous
+// canonical form because none of the current fields can contain a
+// 0x00 byte in production. nonce is exact 32 random bytes (never all
+// zero in practice but could be — separators surrounding it disambiguate
+// regardless), queueID and resourceID are validated against
+// `^[A-Z2-7]+$` at the API boundary, and method comes from
+// http.Request.Method which is a HTTP token (RFC 7230). If a future
+// caller adds a field that can carry arbitrary user-controlled bytes,
+// this format must move to a length-prefixed framing — otherwise two
+// distinct (field-tuple) inputs could produce the same byte string and
+// reuse a single Ed25519 signature across two different operations.
 func canonicalPayload(nonce []byte, queueID, method, resourceID string) []byte {
 	out := make([]byte, 0, len(domainTag)+1+len(nonce)+1+len(queueID)+1+len(method)+1+len(resourceID))
 	out = append(out, domainTag...)

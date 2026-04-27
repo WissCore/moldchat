@@ -98,6 +98,30 @@ func TestPutMessage_RejectsTooLarge(t *testing.T) {
 	}
 }
 
+func TestPutMessage_BoundaryBlobSizes(t *testing.T) {
+	t.Parallel()
+
+	s := memory.New()
+	ctx := context.Background()
+	q, err := s.CreateQueue(ctx, validKeys())
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	// One byte under the limit must succeed.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize-1)); err != nil {
+		t.Errorf("MaxBlobSize-1: %v", err)
+	}
+	// Exactly at the limit must succeed.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize)); err != nil {
+		t.Errorf("MaxBlobSize: %v", err)
+	}
+	// One byte over must be rejected.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize+1)); !errors.Is(err, queue.ErrBlobTooLarge) {
+		t.Errorf("MaxBlobSize+1: got %v, want ErrBlobTooLarge", err)
+	}
+}
+
 func TestPutMessage_QueueNotFound(t *testing.T) {
 	t.Parallel()
 

@@ -107,20 +107,7 @@ func run() int {
 	// anyway and let the runtime tear the goroutine down.
 	var cleanupWg sync.WaitGroup
 	defer func() {
-		rootCancel()
-		done := make(chan struct{})
-		go func() {
-			cleanupWg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(cleanupShutdownTimeout):
-			logger.Warn("cleanup goroutine did not finish before timeout, forcing store close")
-		}
-		if err := closeStore(); err != nil {
-			logger.Warn("close store failed", "err", err.Error())
-		}
+		shutdownCleanly(rootCancel, &cleanupWg, closeStore, cleanupShutdownTimeout, logger)
 	}()
 
 	if runCleanup != nil {
@@ -163,6 +150,29 @@ func addr() string {
 		return v
 	}
 	return defaultAddr
+}
+
+// shutdownCleanly cancels the cleanup-runner context, waits for it to
+// drain (bounded by waitTimeout), and only then closes the store.
+// Extracted into a function so the timeout path is unit-testable
+// without spinning up the whole process. logger is optional for tests.
+func shutdownCleanly(rootCancel context.CancelFunc, cleanupWg *sync.WaitGroup, closeStore func() error, waitTimeout time.Duration, logger *slog.Logger) {
+	rootCancel()
+	done := make(chan struct{})
+	go func() {
+		cleanupWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(waitTimeout):
+		if logger != nil {
+			logger.Warn("cleanup goroutine did not finish before timeout, forcing store close")
+		}
+	}
+	if err := closeStore(); err != nil && logger != nil {
+		logger.Warn("close store failed", "err", err.Error())
+	}
 }
 
 // logLevelFromEnv reads MOLDD_LOG_LEVEL and returns the matching slog

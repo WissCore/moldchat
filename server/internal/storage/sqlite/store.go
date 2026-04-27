@@ -27,11 +27,18 @@ const (
 	queueFilenameSuffix = ".db"
 	dataDirPerm         = 0o700
 
-	// masterMaxOpenConns leaves WAL room for a writer plus several
-	// concurrent readers without crossing the typical container ulimit
-	// once per-queue handles are factored in (each WAL DB is 3 FDs:
-	// main, -wal, -shm).
-	masterMaxOpenConns = 8
+	// masterWriterMaxOpenConns is intentionally 1: SQLite serialises
+	// writers anyway, and a single connection eliminates the chance
+	// of SQLITE_BUSY between concurrent INSERT / UPDATE / DELETE
+	// statements going through the writer pool.
+	masterWriterMaxOpenConns = 1
+
+	// masterReaderMaxOpenConns gives reader queries (GetQueue,
+	// ExpiredQueueIDs, getQueueWithSalt) a parallel pool sized for
+	// typical small-server CPU counts. WAL mode lets these readers
+	// proceed against the last committed snapshot without blocking
+	// the writer or each other.
+	masterReaderMaxOpenConns = 4
 
 	// queueMaxOpenConns stays at 1 because per-queue files are
 	// write-mostly and not WAL — there is no concurrent-read benefit
@@ -141,10 +148,11 @@ func (c *cipherConnector) Driver() driver.Driver { return cipherDriver }
 //     (per-queue WAL is currently disabled, so this is a no-op today,
 //     but flip the bit and the same caveat applies).
 type Store struct {
-	seed     MasterSeed
-	dataDir  string
-	masterDB *sql.DB
-	pool     *queueDBPool
+	seed         MasterSeed
+	dataDir      string
+	masterDB     *sql.DB // writer pool, MaxOpenConns=1
+	masterReadDB *sql.DB // reader pool, MaxOpenConns=N (WAL snapshot reads)
+	pool         *queueDBPool
 	// queueLocks serialises operations targeting the same queue.
 	// DeleteQueue takes the write side (exclusive); concurrent
 	// PutMessage / ListMessages / DeleteMessage on the same id share
@@ -164,32 +172,53 @@ func New(seed MasterSeed, dataDir string) (*Store, error) {
 	if mkdirErr := os.MkdirAll(abs, dataDirPerm); mkdirErr != nil {
 		return nil, fmt.Errorf("create dataDir: %w", mkdirErr)
 	}
+	masterPath := filepath.Join(abs, masterFilename)
 	masterDB, err := openEncryptedDB(
-		filepath.Join(abs, masterFilename),
+		masterPath,
 		seed.MasterKey,
 		true,
-		masterMaxOpenConns,
+		masterWriterMaxOpenConns,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("open master.db: %w", err)
+		return nil, fmt.Errorf("open master.db (writer): %w", err)
 	}
 	if _, schemaErr := masterDB.Exec(masterSchema); schemaErr != nil {
 		_ = masterDB.Close()
 		return nil, fmt.Errorf("init master schema: %w", schemaErr)
 	}
+	// Reader pool shares the file via WAL: the writer commits create
+	// fresh snapshots; readers can run concurrently without blocking
+	// each other or the writer.
+	masterReadDB, err := openEncryptedDB(
+		masterPath,
+		seed.MasterKey,
+		false, // WAL is already enabled by the writer; the file metadata persists
+		masterReaderMaxOpenConns,
+	)
+	if err != nil {
+		_ = masterDB.Close()
+		return nil, fmt.Errorf("open master.db (reader): %w", err)
+	}
 	return &Store{
-		seed:     seed,
-		dataDir:  abs,
-		masterDB: masterDB,
-		pool:     newQueueDBPool(queueDBCapacity),
+		seed:         seed,
+		dataDir:      abs,
+		masterDB:     masterDB,
+		masterReadDB: masterReadDB,
+		pool:         newQueueDBPool(queueDBCapacity),
 	}, nil
 }
 
 // Close releases resources held by the store: it drains the per-queue
-// pool first, then closes the master DB handle.
+// pool first, then closes both master DB handles (reader and writer).
+// The first close error is reported; subsequent ones are best-effort.
 func (s *Store) Close() error {
 	s.pool.Close()
-	return s.masterDB.Close()
+	readErr := s.masterReadDB.Close()
+	writeErr := s.masterDB.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return readErr
 }
 
 const masterSchema = `
@@ -404,14 +433,15 @@ func (s *Store) GetQueue(ctx context.Context, id string) (*queue.Queue, error) {
 }
 
 // getQueueWithSalt returns the queue metadata together with the per-queue
-// salt the caller needs to open the encrypted file.
+// salt the caller needs to open the encrypted file. Reads go through the
+// reader pool so concurrent GetQueue calls don't serialise on the writer.
 func (s *Store) getQueueWithSalt(ctx context.Context, id string) (*queue.Queue, []byte, error) {
 	var (
 		q                                queue.Queue
 		salt                             []byte
 		createdNs, expiresNs, lastAccess int64
 	)
-	row := s.masterDB.QueryRowContext(ctx,
+	row := s.masterReadDB.QueryRowContext(ctx,
 		`SELECT id, owner_x25519_pub, owner_ed25519_pub, key_salt, created_at, expires_at, last_access FROM queues WHERE id = ?`, id,
 	)
 	if err := row.Scan(&q.ID, &q.OwnerX25519Pub, &q.OwnerEd25519Pub, &salt, &createdNs, &expiresNs, &lastAccess); err != nil {
@@ -568,8 +598,10 @@ func (s *Store) touchQueue(ctx context.Context, queueID string, t time.Time) err
 }
 
 // ExpiredQueueIDs returns queue identifiers whose expires_at is before t.
+// Read-only — uses the reader pool so the periodic cleanup tick does not
+// contend with in-flight writes on the master DB.
 func (s *Store) ExpiredQueueIDs(ctx context.Context, t time.Time) ([]string, error) {
-	rows, err := s.masterDB.QueryContext(ctx,
+	rows, err := s.masterReadDB.QueryContext(ctx,
 		`SELECT id FROM queues WHERE expires_at < ?`, t.UnixNano())
 	if err != nil {
 		return nil, err

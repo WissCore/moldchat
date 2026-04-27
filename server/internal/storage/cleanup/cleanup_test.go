@@ -23,9 +23,19 @@ type fakeCleaner struct {
 	deleted    []string
 	listErr    error
 	deleteErrs map[string]error
+	// listDelay simulates a slow Tick so tests can race a context
+	// cancel against an in-flight ExpiredQueueIDs call.
+	listDelay time.Duration
 }
 
-func (f *fakeCleaner) ExpiredQueueIDs(_ context.Context, _ time.Time) ([]string, error) {
+func (f *fakeCleaner) ExpiredQueueIDs(ctx context.Context, _ time.Time) ([]string, error) {
+	if f.listDelay > 0 {
+		select {
+		case <-time.After(f.listDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -104,6 +114,55 @@ func TestTick_ListErrorReturnsZero(t *testing.T) {
 	r := &cleanup.Runner{Cleaner: c}
 	if got := r.Tick(context.Background()); got != 0 {
 		t.Errorf("deleted on list error: got %d, want 0", got)
+	}
+}
+
+// TestRun_ExitsOnContextCancel is the regression guard for the shutdown
+// race between cleanup goroutine and DB close: when its context is
+// cancelled the Run loop must return promptly even if a Tick is
+// in-flight, otherwise main()'s wait-then-close sequence would risk
+// closing the store under an active query.
+func TestRun_ExitsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	c := &fakeCleaner{
+		expired:   []string{"q1"},
+		listDelay: 200 * time.Millisecond,
+	}
+	r := &cleanup.Runner{Cleaner: c, Interval: 10 * time.Millisecond}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Run(ctx)
+	}()
+
+	// Give Run a tick to enter ExpiredQueueIDs.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of context cancel")
+	}
+}
+
+// TestRun_ZeroInterval is a smoke test for the documented contract that
+// Runner.Run with Interval <= 0 returns immediately rather than spinning.
+func TestRun_ZeroInterval(t *testing.T) {
+	t.Parallel()
+	r := &cleanup.Runner{Cleaner: &fakeCleaner{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Run(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run with zero interval did not return")
 	}
 }
 

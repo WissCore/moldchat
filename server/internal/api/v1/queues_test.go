@@ -440,6 +440,17 @@ func TestMessages_RejectMalformedQueueID(t *testing.T) {
 		"contains-lowercase-not-base32",
 		strings.Repeat("A", 33),
 		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1", // '1' is outside base32 RFC4648 §6
+		// Path-traversal-ish probes the regex must reject. The HTTP
+		// router already rejects multi-segment paths, but encoded
+		// variants that survive normalisation (or future routing
+		// changes) must still hit our format guard rather than the
+		// filesystem. Null bytes and other characters that Go's URL
+		// parser refuses are covered by the parser itself, not this
+		// regex.
+		"..",
+		strings.Repeat(".", 32),
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%2F",
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-",
 	}
 	for _, id := range cases {
 		t.Run(id, func(t *testing.T) {

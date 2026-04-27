@@ -29,9 +29,3 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # Cap GraphQL query scope to fit a small repo. Defaults
-          # (400 / 500) are sized for monorepos with hundreds of
-          # releases; ours has a handful, and the larger queries
-          # have been observed to trip GitHub-side GraphQL flakes.
-          release-search-depth: 50
-          commit-search-depth: 50

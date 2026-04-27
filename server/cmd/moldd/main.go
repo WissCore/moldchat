@@ -4,15 +4,16 @@
 
 // Command moldd is the MoldChat relay server.
 //
-// The current build exposes a queue HTTP API backed by in-memory storage and
-// authorises owners by constant-time comparison against the public key
-// supplied at queue creation. Sealed-sender routing, persistence, anti-spam,
-// and key transparency are not implemented yet.
+// The current build exposes a queue HTTP API. Storage backend is selected via
+// the MOLDD_STORAGE environment variable: "memory" (the default, ephemeral)
+// or "sqlite" (persistent, encrypted with SQLCipher and an HKDF-derived key
+// per queue, requires MOLDD_MASTER_SEED and MOLDD_DATA_DIR).
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,13 +23,17 @@ import (
 
 	v1 "github.com/WissCore/moldchat/server/internal/api/v1"
 	"github.com/WissCore/moldchat/server/internal/health"
+	"github.com/WissCore/moldchat/server/internal/storage"
+	"github.com/WissCore/moldchat/server/internal/storage/cleanup"
 	"github.com/WissCore/moldchat/server/internal/storage/memory"
+	"github.com/WissCore/moldchat/server/internal/storage/sqlite"
 )
 
 const (
-	defaultAddr       = ":8080"
-	readHeaderTimeout = 10 * time.Second
-	shutdownTimeout   = 5 * time.Second
+	defaultAddr            = ":8080"
+	readHeaderTimeout      = 10 * time.Second
+	shutdownTimeout        = 5 * time.Second
+	defaultCleanupInterval = 5 * time.Minute
 )
 
 func main() {
@@ -36,33 +41,38 @@ func main() {
 }
 
 func run() int {
-	addr := defaultAddr
-	if v := os.Getenv("MOLDD_ADDR"); v != "" {
-		addr = v
-	}
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	store, closeStore, runCleanup, err := initStorage(logger)
+	if err != nil {
+		logger.Error("init storage", "err", err.Error())
+		return 1
+	}
+	defer func() { _ = closeStore() }()
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
 
-	api := &v1.Server{
-		Storage: memory.New(),
-		Logger:  logger,
-	}
+	api := &v1.Server{Storage: store, Logger: logger}
 	api.Mount(mux)
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              addr(),
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+	if runCleanup != nil {
+		go runCleanup(rootCtx)
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
-		logger.Info("moldd starting", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
+		logger.Info("moldd starting", "addr", srv.Addr)
+		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+			serverErr <- listenErr
 		}
 	}()
 
@@ -70,8 +80,8 @@ func run() int {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
-	case err := <-serverErr:
-		logger.Error("server failed", "err", err)
+	case listenErr := <-serverErr:
+		logger.Error("server failed", "err", listenErr.Error())
 		return 1
 	case sig := <-stop:
 		logger.Info("shutdown requested", "signal", sig.String())
@@ -79,10 +89,56 @@ func run() int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("graceful shutdown failed", "err", err)
+	if shutdownErr := srv.Shutdown(ctx); shutdownErr != nil {
+		logger.Error("graceful shutdown failed", "err", shutdownErr.Error())
 		return 1
 	}
 	logger.Info("moldd stopped")
 	return 0
+}
+
+func addr() string {
+	if v := os.Getenv("MOLDD_ADDR"); v != "" {
+		return v
+	}
+	return defaultAddr
+}
+
+// initStorage constructs the configured storage backend and (when persistent)
+// the cleanup-runner that evicts expired queues. The closeStore callback
+// releases backend resources; runCleanup is nil for the in-memory backend.
+func initStorage(logger *slog.Logger) (
+	store storage.Storage,
+	closeStore func() error,
+	runCleanup func(context.Context),
+	err error,
+) {
+	switch backend := os.Getenv("MOLDD_STORAGE"); backend {
+	case "", "memory":
+		mem := memory.New()
+		return mem, func() error { return nil }, nil, nil
+
+	case "sqlite":
+		seed, seedErr := sqlite.LoadMasterSeed()
+		if seedErr != nil {
+			return nil, nil, nil, fmt.Errorf("sqlite backend: %w", seedErr)
+		}
+		dataDir := os.Getenv("MOLDD_DATA_DIR")
+		if dataDir == "" {
+			return nil, nil, nil, errors.New("sqlite backend: MOLDD_DATA_DIR is required")
+		}
+		st, openErr := sqlite.New(seed, dataDir)
+		if openErr != nil {
+			return nil, nil, nil, fmt.Errorf("sqlite backend: %w", openErr)
+		}
+		runner := &cleanup.Runner{
+			Cleaner:  st,
+			Interval: defaultCleanupInterval,
+			Logger:   logger,
+		}
+		return st, st.Close, runner.Run, nil
+
+	default:
+		return nil, nil, nil, fmt.Errorf("unknown MOLDD_STORAGE backend: %q (valid: memory, sqlite)", backend)
+	}
 }

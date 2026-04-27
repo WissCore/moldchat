@@ -58,6 +58,9 @@ func (r *Runner) Tick(ctx context.Context) int {
 	}
 	ids, err := r.Cleaner.ExpiredQueueIDs(ctx, now)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return 0
+		}
 		r.log(ctx, slog.LevelError, "list expired queues", "err", err.Error())
 		return 0
 	}
@@ -66,6 +69,9 @@ func (r *Runner) Tick(ctx context.Context) int {
 		if err := r.Cleaner.DeleteQueue(ctx, id); err != nil {
 			if errors.Is(err, queue.ErrQueueNotFound) {
 				continue
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return deleted
 			}
 			r.log(ctx, slog.LevelError, "delete expired queue", "err", err.Error())
 			continue

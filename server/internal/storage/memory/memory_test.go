@@ -15,8 +15,10 @@ import (
 )
 
 func validKeys() queue.OwnerKeys {
+	x := make([]byte, queue.X25519PubKeyBytes)
+	x[0] = 1
 	return queue.OwnerKeys{
-		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		X25519Pub:  x,
 		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
 }
@@ -26,12 +28,15 @@ func TestCreateQueue_RejectsInvalidKeys(t *testing.T) {
 
 	s := memory.New()
 
+	nonZeroX := make([]byte, queue.X25519PubKeyBytes)
+	nonZeroX[0] = 1
+
 	bad := queue.OwnerKeys{X25519Pub: make([]byte, 31), Ed25519Pub: make([]byte, 32)}
 	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidX25519Key) {
 		t.Errorf("31-byte X25519: got %v, want ErrInvalidX25519Key", err)
 	}
 
-	bad = queue.OwnerKeys{X25519Pub: make([]byte, 32), Ed25519Pub: make([]byte, 31)}
+	bad = queue.OwnerKeys{X25519Pub: nonZeroX, Ed25519Pub: make([]byte, 31)}
 	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidEd25519Key) {
 		t.Errorf("31-byte Ed25519: got %v, want ErrInvalidEd25519Key", err)
 	}
@@ -90,6 +95,30 @@ func TestPutMessage_RejectsTooLarge(t *testing.T) {
 	}
 	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize+1)); !errors.Is(err, queue.ErrBlobTooLarge) {
 		t.Errorf("PutMessage oversized: got %v, want ErrBlobTooLarge", err)
+	}
+}
+
+func TestPutMessage_BoundaryBlobSizes(t *testing.T) {
+	t.Parallel()
+
+	s := memory.New()
+	ctx := context.Background()
+	q, err := s.CreateQueue(ctx, validKeys())
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	// One byte under the limit must succeed.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize-1)); err != nil {
+		t.Errorf("MaxBlobSize-1: %v", err)
+	}
+	// Exactly at the limit must succeed.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize)); err != nil {
+		t.Errorf("MaxBlobSize: %v", err)
+	}
+	// One byte over must be rejected.
+	if _, err := s.PutMessage(ctx, q.ID, make([]byte, queue.MaxBlobSize+1)); !errors.Is(err, queue.ErrBlobTooLarge) {
+		t.Errorf("MaxBlobSize+1: got %v, want ErrBlobTooLarge", err)
 	}
 }
 

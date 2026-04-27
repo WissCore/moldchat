@@ -4,18 +4,30 @@
 
 // Package memory is an in-memory implementation of storage.Storage.
 //
-// State is lost when the process restarts; intended for tests and short-lived
-// development instances. A persistent encrypted backend can be added behind
-// the same interface without touching API code.
+// State is lost when the process restarts and the data set is bounded
+// only by the constants below; this backend is intended for tests and
+// short-lived development instances, NOT production. A persistent
+// encrypted backend (storage/sqlite) lives behind the same interface
+// for real deployments.
 package memory
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/WissCore/moldchat/server/internal/queue"
+)
+
+// Hard limits to keep the in-memory store from being a DoS surface when
+// it is accidentally left enabled. The caps are deliberately generous so
+// realistic test workloads pass without retuning, and small enough that
+// a misconfigured production deployment cannot grow without bound. When
+// either cap is hit the backend returns queue.ErrServiceCapacity, which
+// the API layer maps to 503 Service Unavailable.
+const (
+	MaxQueues           = 4096
+	MaxMessagesPerQueue = 4096
 )
 
 // Storage holds all queues and messages in process memory.
@@ -52,6 +64,10 @@ func (s *Storage) CreateQueue(_ context.Context, keys queue.OwnerKeys) (*queue.Q
 		LastAccess:      now,
 	}
 	s.mu.Lock()
+	if len(s.queues) >= MaxQueues {
+		s.mu.Unlock()
+		return nil, queue.ErrServiceCapacity
+	}
 	s.queues[id] = q
 	s.mu.Unlock()
 	return cloneQueue(q), nil
@@ -85,6 +101,9 @@ func (s *Storage) PutMessage(_ context.Context, queueID string, blob []byte) (*q
 	if !ok {
 		return nil, queue.ErrQueueNotFound
 	}
+	if len(s.messages[queueID]) >= MaxMessagesPerQueue {
+		return nil, queue.ErrServiceCapacity
+	}
 	id, err := queue.NewMessageID()
 	if err != nil {
 		return nil, err
@@ -113,8 +132,9 @@ func (s *Storage) ListMessages(_ context.Context, queueID string, limit int) ([]
 	if !ok {
 		return nil, false, queue.ErrQueueNotFound
 	}
+	// Messages are appended in arrival order; ReceivedAt is monotonic
+	// non-decreasing (driven by time.Now), so the slice is already sorted.
 	src := s.messages[queueID]
-	sort.SliceStable(src, func(i, j int) bool { return src[i].ReceivedAt.Before(src[j].ReceivedAt) })
 
 	hasMore := false
 	if len(src) > limit {

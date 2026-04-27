@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -126,14 +125,12 @@ func fetchNonce(t *testing.T, baseURL, queueID string) []byte {
 }
 
 // signedRequest builds a request authenticated with a fresh challenge.
-func signedRequest(t *testing.T, baseURL, queueID, method, target string, owner ownerCreds) *http.Request {
+// resourceID binds the signature to the targeted message id for DELETE
+// requests; pass empty string for list/auth-challenge.
+func signedRequest(t *testing.T, baseURL, queueID, method, target, resourceID string, owner ownerCreds) *http.Request {
 	t.Helper()
 	nonce := fetchNonce(t, baseURL, queueID)
-	u, err := url.Parse(baseURL + target)
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	payload := auth.CanonicalPayload(nonce, queueID, method, u.Path)
+	payload := auth.CanonicalPayload(nonce, queueID, method, resourceID)
 	sig := ed25519.Sign(owner.ed25519Pri, payload)
 
 	req, err := http.NewRequest(method, baseURL+target, nil)
@@ -207,7 +204,7 @@ func TestPutMessage_RoundTrip(t *testing.T) {
 	}
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", owner)
+		"/v1/queues/"+queueID+"/messages", "", owner)
 	getResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -279,7 +276,7 @@ func TestListMessages_Unauthorized(t *testing.T) {
 
 	intruder := newOwner(t)
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", intruder)
+		"/v1/queues/"+queueID+"/messages", "", intruder)
 	wrongResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
@@ -297,7 +294,7 @@ func TestListMessages_RejectsReplay(t *testing.T) {
 	queueID := createQueue(t, srv.URL, owner)
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages", owner)
+		"/v1/queues/"+queueID+"/messages", "", owner)
 	first, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("first do: %v", err)
@@ -350,7 +347,7 @@ func TestDeleteMessage_RoundTrip(t *testing.T) {
 	_ = putResp.Body.Close()
 
 	req := signedRequest(t, srv.URL, queueID, http.MethodDelete,
-		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, puts.MessageID, owner)
 	delResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
@@ -380,7 +377,7 @@ func TestListMessages_RejectsTamperedMethod(t *testing.T) {
 
 	// Sign for GET, submit as DELETE.
 	req := signedRequest(t, srv.URL, queueID, http.MethodGet,
-		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, owner)
+		"/v1/queues/"+queueID+"/messages/"+puts.MessageID, puts.MessageID, owner)
 	req.Method = http.MethodDelete
 	req.URL.Path = "/v1/queues/" + queueID + "/messages/" + puts.MessageID
 
@@ -427,6 +424,99 @@ func TestListMessages_MalformedAuthorizationHeader(t *testing.T) {
 				t.Errorf("got %d, want 401", resp.StatusCode)
 			}
 		})
+	}
+}
+
+// TestMessages_RejectMalformedQueueID covers the API-level reaction to
+// queue identifiers that don't match the on-the-wire format. Anything
+// that is not 32 base32 characters must collapse to 404 so we don't
+// leak validation-vs-lookup distinctions.
+func TestMessages_RejectMalformedQueueID(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t)
+
+	cases := []string{
+		"too-short",
+		"contains-lowercase-not-base32",
+		strings.Repeat("A", 33),
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1", // '1' is outside base32 RFC4648 §6
+		// Path-traversal-ish probes the regex must reject. The HTTP
+		// router already rejects multi-segment paths, but encoded
+		// variants that survive normalisation (or future routing
+		// changes) must still hit our format guard rather than the
+		// filesystem. Null bytes and other characters that Go's URL
+		// parser refuses are covered by the parser itself, not this
+		// regex.
+		"..",
+		strings.Repeat(".", 32),
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%2F",
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-",
+	}
+	for _, id := range cases {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+			type probe struct {
+				method, target string
+			}
+			probes := []probe{
+				{http.MethodGet, "/v1/queues/" + id + "/messages"},
+				{http.MethodGet, "/v1/queues/" + id + "/auth-challenge"},
+				{http.MethodDelete, "/v1/queues/" + id + "/messages/SOMEMSG"},
+			}
+			for _, p := range probes {
+				req, err := http.NewRequest(p.method, srv.URL+p.target, nil)
+				if err != nil {
+					t.Fatalf("new request %s %s: %v", p.method, p.target, err)
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatalf("%s %s: %v", p.method, p.target, err)
+				}
+				_ = resp.Body.Close()
+				if resp.StatusCode != http.StatusNotFound {
+					t.Errorf("%s %s: got %d, want 404", p.method, p.target, resp.StatusCode)
+				}
+			}
+		})
+	}
+}
+
+// TestCreateQueue_ServiceCapacity verifies that filling the in-memory
+// backend to MaxQueues makes the next POST return 503 Service
+// Unavailable rather than leaking a 500 internal error. Heavy: skipped
+// in -short. Reuses a single owner across iterations so the cap path
+// (not crypto keygen) is what's exercised.
+func TestCreateQueue_ServiceCapacity(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping capacity test in -short mode")
+	}
+	srv := newTestServer(t)
+	owner := newOwner(t)
+	body := map[string]string{
+		"owner_x25519_pubkey":  base64.StdEncoding.EncodeToString(owner.x25519Pub),
+		"owner_ed25519_pubkey": base64.StdEncoding.EncodeToString(owner.ed25519Pub),
+	}
+	raw, _ := json.Marshal(body)
+
+	for i := 0; i < memory.MaxQueues; i++ {
+		resp, err := http.Post(srv.URL+"/v1/queues", "application/json", bytes.NewReader(raw))
+		if err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("seed %d: got %d, want 201", i, resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Post(srv.URL+"/v1/queues", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("over-cap post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("over-cap status: got %d, want 503", resp.StatusCode)
 	}
 }
 

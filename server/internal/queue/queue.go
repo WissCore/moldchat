@@ -12,12 +12,17 @@ package queue
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base32"
 	"errors"
 	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
+
+// allZeroX25519 is a sentinel zero point used by the constant-time
+// equality check in ValidateOwnerKeys.
+var allZeroX25519 = make([]byte, X25519PubKeyBytes)
 
 // Sizing and limits for queues and messages.
 const (
@@ -39,6 +44,7 @@ var (
 	ErrEmptyBlob         = errors.New("blob is empty")
 	ErrInvalidX25519Key  = errors.New("x25519 public key must be 32 bytes")
 	ErrInvalidEd25519Key = errors.New("ed25519 public key must be 32 bytes")
+	ErrServiceCapacity   = errors.New("service at capacity")
 )
 
 // OwnerKeys is the pair of public keys registered with a queue at creation
@@ -86,9 +92,17 @@ func generateID(n int) (string, error) {
 }
 
 // ValidateOwnerKeys rejects key pairs whose lengths do not match the
-// expected sizes for X25519 and Ed25519 public keys.
+// expected sizes for X25519 and Ed25519 public keys, and rejects the
+// trivially-bad all-zero X25519 point. Full low-order point screening
+// will land alongside the first DH consumer so it is exercised on the
+// same code path that uses the key. The all-zero comparison runs in
+// constant time so this validator does not become a timing oracle for
+// adversarial X25519 inputs once the queue is in production.
 func ValidateOwnerKeys(k OwnerKeys) error {
 	if len(k.X25519Pub) != X25519PubKeyBytes {
+		return ErrInvalidX25519Key
+	}
+	if subtle.ConstantTimeCompare(k.X25519Pub, allZeroX25519) == 1 {
 		return ErrInvalidX25519Key
 	}
 	if len(k.Ed25519Pub) != Ed25519PubKeyBytes {

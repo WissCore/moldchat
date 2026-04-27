@@ -23,9 +23,19 @@ type fakeCleaner struct {
 	deleted    []string
 	listErr    error
 	deleteErrs map[string]error
+	// listDelay simulates a slow Tick so tests can race a context
+	// cancel against an in-flight ExpiredQueueIDs call.
+	listDelay time.Duration
 }
 
-func (f *fakeCleaner) ExpiredQueueIDs(_ context.Context, _ time.Time) ([]string, error) {
+func (f *fakeCleaner) ExpiredQueueIDs(ctx context.Context, _ time.Time) ([]string, error) {
+	if f.listDelay > 0 {
+		select {
+		case <-time.After(f.listDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -107,6 +117,55 @@ func TestTick_ListErrorReturnsZero(t *testing.T) {
 	}
 }
 
+// TestRun_ExitsOnContextCancel is the regression guard for the shutdown
+// race between cleanup goroutine and DB close: when its context is
+// cancelled the Run loop must return promptly even if a Tick is
+// in-flight, otherwise main()'s wait-then-close sequence would risk
+// closing the store under an active query.
+func TestRun_ExitsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	c := &fakeCleaner{
+		expired:   []string{"q1"},
+		listDelay: 200 * time.Millisecond,
+	}
+	r := &cleanup.Runner{Cleaner: c, Interval: 10 * time.Millisecond}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Run(ctx)
+	}()
+
+	// Give Run a tick to enter ExpiredQueueIDs.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of context cancel")
+	}
+}
+
+// TestRun_ZeroInterval is a smoke test for the documented contract that
+// Runner.Run with Interval <= 0 returns immediately rather than spinning.
+func TestRun_ZeroInterval(t *testing.T) {
+	t.Parallel()
+	r := &cleanup.Runner{Cleaner: &fakeCleaner{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.Run(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run with zero interval did not return")
+	}
+}
+
 // Integration test: run against a real SQLCipher store with a frozen clock.
 func TestTick_AgainstRealSQLiteStore(t *testing.T) {
 	t.Parallel()
@@ -123,8 +182,10 @@ func TestTick_AgainstRealSQLiteStore(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
+	x := make([]byte, queue.X25519PubKeyBytes)
+	x[0] = 1
 	keys := queue.OwnerKeys{
-		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		X25519Pub:  x,
 		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
 	q, err := st.CreateQueue(ctx, keys)
@@ -143,8 +204,9 @@ func TestTick_AgainstRealSQLiteStore(t *testing.T) {
 	if _, err := st.GetQueue(ctx, q.ID); !errors.Is(err, queue.ErrQueueNotFound) {
 		t.Errorf("queue still present after cleanup: %v", err)
 	}
-	// File on disk should be gone.
-	path := filepath.Join(dir, q.ID+".db")
+	// File on disk should be gone. Filenames are HMAC(seed, queueID),
+	// not the raw queue id.
+	path := filepath.Join(dir, seed.QueueFilename(q.ID)+".db")
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("queue db file still exists after cleanup: %v", statErr)
 	}

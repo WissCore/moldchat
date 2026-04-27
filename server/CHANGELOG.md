@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/WissCore/moldchat/compare/server-v0.1.0...server-v0.1.1) (2026-04-27)
+
+
+### Features
+
+* **server:** add queue HTTP API with in-memory storage ([#17](https://github.com/WissCore/moldchat/issues/17)) ([a27acec](https://github.com/WissCore/moldchat/commit/a27acecf63d99c47cbc756ef67fdf514cac85402))
+
 ## 0.1.0 (2026-04-26)
 
 

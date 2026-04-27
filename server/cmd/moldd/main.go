@@ -15,9 +15,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,7 +36,12 @@ import (
 const (
 	defaultAddr            = ":8080"
 	readHeaderTimeout      = 10 * time.Second
+	readTimeout            = 30 * time.Second
+	writeTimeout           = 60 * time.Second
+	idleTimeout            = 120 * time.Second
+	maxHeaderBytes         = 16 * 1024
 	shutdownTimeout        = 5 * time.Second
+	cleanupShutdownTimeout = 10 * time.Second
 	defaultCleanupInterval = 5 * time.Minute
 )
 
@@ -42,14 +50,21 @@ func main() {
 }
 
 func run() int {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevelFromEnv()}))
+	slog.SetDefault(logger)
+
+	// Register signal handlers FIRST so a TERM that arrives during the
+	// brief startup window between "go func" and "signal.Notify" is not
+	// dropped to the OS default handler (which would kill us without
+	// graceful shutdown — visible during k8s scale-down storms).
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	store, closeStore, runCleanup, err := initStorage(logger)
 	if err != nil {
 		logger.Error("init storage", "err", err.Error())
 		return 1
 	}
-	defer func() { _ = closeStore() }()
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
@@ -58,27 +73,66 @@ func run() int {
 	api.Mount(mux)
 
 	srv := &http.Server{
-		Addr:              addr(),
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+	}
+
+	// Bind explicitly so the actual listening address (which may differ
+	// from the configured one when MOLDD_ADDR=":0" is used in tests) is
+	// available for the Debug log below.
+	listener, err := net.Listen("tcp", addr())
+	if err != nil {
+		logger.Error("listen", "err", err.Error())
+		return 1
 	}
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
-	defer rootCancel()
+
+	// Ordered shutdown: cancel cleanup ctx → wait for cleanup goroutine to
+	// finish any in-flight Tick → only then close the store. Closing the
+	// store while a Tick is mid-query produces undefined behaviour in the
+	// SQL driver, so the WaitGroup gate is mandatory, not cosmetic. The
+	// wait is itself bounded so a wedged SQL operation cannot hold the
+	// process up forever; if the bound is exceeded we close the store
+	// anyway and let the runtime tear the goroutine down.
+	var cleanupWg sync.WaitGroup
+	defer func() {
+		rootCancel()
+		done := make(chan struct{})
+		go func() {
+			cleanupWg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(cleanupShutdownTimeout):
+			logger.Warn("cleanup goroutine did not finish before timeout, forcing store close")
+		}
+		if err := closeStore(); err != nil {
+			logger.Warn("close store failed", "err", err.Error())
+		}
+	}()
+
 	if runCleanup != nil {
-		go runCleanup(rootCtx)
+		cleanupWg.Add(1)
+		go func() {
+			defer cleanupWg.Done()
+			runCleanup(rootCtx)
+		}()
 	}
 
 	serverErr := make(chan error, 1)
 	go func() {
-		logger.Info("moldd starting", "addr", srv.Addr)
-		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-			serverErr <- listenErr
+		logger.Info("moldd starting")
+		logger.Debug("http listener", "addr", listener.Addr().String())
+		if serveErr := srv.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			serverErr <- serveErr
 		}
 	}()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case listenErr := <-serverErr:
@@ -103,6 +157,23 @@ func addr() string {
 		return v
 	}
 	return defaultAddr
+}
+
+// logLevelFromEnv reads MOLDD_LOG_LEVEL and returns the matching slog
+// level. Unknown or unset values default to info. This is the only knob
+// that exposes the listening address (Debug level), keeping operational
+// topology out of production logs by default.
+func logLevelFromEnv() slog.Level {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MOLDD_LOG_LEVEL"))) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // initStorage constructs the configured storage backend and (when persistent)

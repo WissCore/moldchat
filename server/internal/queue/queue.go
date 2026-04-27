@@ -39,6 +39,7 @@ var (
 	ErrEmptyBlob         = errors.New("blob is empty")
 	ErrInvalidX25519Key  = errors.New("x25519 public key must be 32 bytes")
 	ErrInvalidEd25519Key = errors.New("ed25519 public key must be 32 bytes")
+	ErrServiceCapacity   = errors.New("service at capacity")
 )
 
 // OwnerKeys is the pair of public keys registered with a queue at creation
@@ -86,13 +87,29 @@ func generateID(n int) (string, error) {
 }
 
 // ValidateOwnerKeys rejects key pairs whose lengths do not match the
-// expected sizes for X25519 and Ed25519 public keys.
+// expected sizes for X25519 and Ed25519 public keys, and rejects the
+// trivially-bad all-zero X25519 point. Full low-order point screening
+// will land alongside the first DH consumer so it is exercised on the
+// same code path that uses the key.
 func ValidateOwnerKeys(k OwnerKeys) error {
 	if len(k.X25519Pub) != X25519PubKeyBytes {
+		return ErrInvalidX25519Key
+	}
+	if isAllZero(k.X25519Pub) {
 		return ErrInvalidX25519Key
 	}
 	if len(k.Ed25519Pub) != Ed25519PubKeyBytes {
 		return ErrInvalidEd25519Key
 	}
 	return nil
+}
+
+// isAllZero returns true iff every byte of b is zero.
+func isAllZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
 }

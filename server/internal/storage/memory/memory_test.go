@@ -15,8 +15,10 @@ import (
 )
 
 func validKeys() queue.OwnerKeys {
+	x := make([]byte, queue.X25519PubKeyBytes)
+	x[0] = 1
 	return queue.OwnerKeys{
-		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		X25519Pub:  x,
 		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
 }
@@ -26,12 +28,15 @@ func TestCreateQueue_RejectsInvalidKeys(t *testing.T) {
 
 	s := memory.New()
 
+	nonZeroX := make([]byte, queue.X25519PubKeyBytes)
+	nonZeroX[0] = 1
+
 	bad := queue.OwnerKeys{X25519Pub: make([]byte, 31), Ed25519Pub: make([]byte, 32)}
 	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidX25519Key) {
 		t.Errorf("31-byte X25519: got %v, want ErrInvalidX25519Key", err)
 	}
 
-	bad = queue.OwnerKeys{X25519Pub: make([]byte, 32), Ed25519Pub: make([]byte, 31)}
+	bad = queue.OwnerKeys{X25519Pub: nonZeroX, Ed25519Pub: make([]byte, 31)}
 	if _, err := s.CreateQueue(context.Background(), bad); !errors.Is(err, queue.ErrInvalidEd25519Key) {
 		t.Errorf("31-byte Ed25519: got %v, want ErrInvalidEd25519Key", err)
 	}

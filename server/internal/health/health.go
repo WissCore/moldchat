@@ -8,6 +8,7 @@ package health
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 )
@@ -26,6 +27,8 @@ func Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(body)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			slog.Default().Debug("healthz encode failed", "err", err.Error())
+		}
 	})
 }

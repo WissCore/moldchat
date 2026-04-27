@@ -86,8 +86,10 @@ func NewIssuer() *Issuer {
 
 // Issue returns a fresh nonce together with its expiry timestamp.
 // The nonce is single-use and remembered until Verify consumes it or it
-// expires. Each call sweeps expired entries; if the live set is at the
-// MaxOutstandingNonces cap after sweeping, ErrIssuerSaturated is returned.
+// expires. Sweeping of expired entries is amortised: it runs only when
+// the live set has hit the MaxOutstandingNonces cap, which keeps the
+// fast path O(1) under normal load. After sweeping, if the cap is still
+// reached, ErrIssuerSaturated is returned.
 func (i *Issuer) Issue() (nonce []byte, expiresAt time.Time, err error) {
 	nonce = make([]byte, NonceBytes)
 	if _, err = rand.Read(nonce); err != nil {
@@ -98,13 +100,15 @@ func (i *Issuer) Issue() (nonce []byte, expiresAt time.Time, err error) {
 	defer i.mu.Unlock()
 
 	now := i.now()
-	for k, exp := range i.issued {
-		if !exp.After(now) {
-			delete(i.issued, k)
-		}
-	}
 	if len(i.issued) >= MaxOutstandingNonces {
-		return nil, time.Time{}, ErrIssuerSaturated
+		for k, exp := range i.issued {
+			if !exp.After(now) {
+				delete(i.issued, k)
+			}
+		}
+		if len(i.issued) >= MaxOutstandingNonces {
+			return nil, time.Time{}, ErrIssuerSaturated
+		}
 	}
 
 	expiresAt = now.Add(NonceTTL)
@@ -172,15 +176,22 @@ func CanonicalPayload(nonce []byte, queueID, method, path string) []byte {
 }
 
 // ParseAuthorization parses an "ED25519-Sig <sig_b64>,<pubkey_b64>,<nonce_b64>"
-// header into raw signature, public-key, and nonce bytes.
+// header into raw signature, public-key, and nonce bytes. The auth-scheme
+// token is matched case-insensitively per RFC 7235 §2.1, and the
+// separator between the scheme and the credentials may be any run of
+// SP/HTAB characters as the same RFC permits.
 func ParseAuthorization(header string) (sig, pubkey, nonce []byte, err error) {
 	if header == "" {
 		return nil, nil, nil, ErrAuthorizationMissing
 	}
-	rest, ok := strings.CutPrefix(header, AuthScheme+" ")
-	if !ok {
+	sep := strings.IndexAny(header, " \t")
+	if sep < 0 {
 		return nil, nil, nil, ErrAuthorizationMalformed
 	}
+	if !strings.EqualFold(header[:sep], AuthScheme) {
+		return nil, nil, nil, ErrAuthorizationMalformed
+	}
+	rest := strings.TrimLeft(header[sep+1:], " \t")
 	parts := strings.Split(rest, ",")
 	if len(parts) != 3 {
 		return nil, nil, nil, ErrAuthorizationMalformed

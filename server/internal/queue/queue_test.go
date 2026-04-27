@@ -45,8 +45,10 @@ func TestNewMessageID_Length(t *testing.T) {
 func TestValidateOwnerKeys(t *testing.T) {
 	t.Parallel()
 
+	nonZeroX := make([]byte, queue.X25519PubKeyBytes)
+	nonZeroX[0] = 1
 	good := queue.OwnerKeys{
-		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		X25519Pub:  nonZeroX,
 		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
 	if err := queue.ValidateOwnerKeys(good); err != nil {
@@ -57,6 +59,12 @@ func TestValidateOwnerKeys(t *testing.T) {
 	shortX.X25519Pub = make([]byte, 31)
 	if err := queue.ValidateOwnerKeys(shortX); !errors.Is(err, queue.ErrInvalidX25519Key) {
 		t.Errorf("short X25519: got %v, want ErrInvalidX25519Key", err)
+	}
+
+	zeroX := good
+	zeroX.X25519Pub = make([]byte, queue.X25519PubKeyBytes)
+	if err := queue.ValidateOwnerKeys(zeroX); !errors.Is(err, queue.ErrInvalidX25519Key) {
+		t.Errorf("all-zero X25519: got %v, want ErrInvalidX25519Key", err)
 	}
 
 	shortEd := good

@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/WissCore/moldchat/server/internal/auth"
@@ -22,6 +24,12 @@ import (
 // request is rejected. The cause is intentionally not surfaced to the
 // client, but it bumps the AuthFailureCount counter on Server.
 var errAuthDenied = errors.New("authorization denied")
+
+// queueIDRegex validates the format of queue identifiers received from
+// clients. New IDs are 32 unpadded base32 characters (RFC 4648 §6).
+// Rejecting malformed IDs early keeps storage lookups predictable and
+// closes off any path-traversal vector through the URL.
+var queueIDRegex = regexp.MustCompile(`^[A-Z2-7]{32}$`)
 
 // maxCreateBody bounds the JSON body for queue-creation requests.
 const maxCreateBody = 4 * 1024
@@ -57,11 +65,15 @@ func (s *Server) handleCreateQueue() http.Handler {
 		case errors.Is(err, queue.ErrInvalidX25519Key), errors.Is(err, queue.ErrInvalidEd25519Key):
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, queue.ErrServiceCapacity):
+			writeError(w, http.StatusServiceUnavailable, "service at capacity")
+			return
 		case err != nil:
 			s.logServerError("create queue", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"queue_id":   q.ID,
 			"expires_at": q.ExpiresAt.Format(time.RFC3339),
@@ -72,6 +84,10 @@ func (s *Server) handleCreateQueue() http.Handler {
 func (s *Server) handleAuthChallenge() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queueID := r.PathValue("id")
+		if !queueIDRegex.MatchString(queueID) {
+			writeError(w, http.StatusNotFound, "queue not found")
+			return
+		}
 		if _, err := s.Storage.GetQueue(r.Context(), queueID); err != nil {
 			if errors.Is(err, queue.ErrQueueNotFound) {
 				writeError(w, http.StatusNotFound, "queue not found")
@@ -91,6 +107,7 @@ func (s *Server) handleAuthChallenge() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"nonce":      base64.StdEncoding.EncodeToString(nonce),
 			"expires_at": expiresAt.Format(time.RFC3339),
@@ -100,6 +117,16 @@ func (s *Server) handleAuthChallenge() http.Handler {
 
 func (s *Server) handlePutMessage() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate the queue_id BEFORE reading the body. This stops the
+		// trivial DoS where an attacker sends MaxBlobSize bodies to
+		// guaranteed-malformed IDs: we'd otherwise consume bandwidth, RAM,
+		// and CPU for nothing. Cheap path-only check first, expensive body
+		// read only if the URL is well-formed.
+		queueID := r.PathValue("id")
+		if !queueIDRegex.MatchString(queueID) {
+			writeError(w, http.StatusNotFound, "queue not found")
+			return
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, queue.MaxBlobSize+1)
 		blob, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -110,7 +137,6 @@ func (s *Server) handlePutMessage() http.Handler {
 			writeError(w, http.StatusRequestEntityTooLarge, "blob exceeds maximum size")
 			return
 		}
-		queueID := r.PathValue("id")
 		m, err := s.Storage.PutMessage(r.Context(), queueID, blob)
 		switch {
 		case errors.Is(err, queue.ErrQueueNotFound):
@@ -122,11 +148,15 @@ func (s *Server) handlePutMessage() http.Handler {
 		case errors.Is(err, queue.ErrBlobTooLarge):
 			writeError(w, http.StatusRequestEntityTooLarge, "blob exceeds maximum size")
 			return
+		case errors.Is(err, queue.ErrServiceCapacity):
+			writeError(w, http.StatusServiceUnavailable, "service at capacity")
+			return
 		case err != nil:
 			s.logServerError("put message", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"message_id":  m.ID,
 			"accepted_at": m.ReceivedAt.Format(time.RFC3339),
@@ -142,6 +172,10 @@ func (s *Server) handleListMessages() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queueID := r.PathValue("id")
+		if !queueIDRegex.MatchString(queueID) {
+			writeError(w, http.StatusNotFound, "queue not found")
+			return
+		}
 		q, err := s.Storage.GetQueue(r.Context(), queueID)
 		if errors.Is(err, queue.ErrQueueNotFound) {
 			writeError(w, http.StatusNotFound, "queue not found")
@@ -171,6 +205,7 @@ func (s *Server) handleListMessages() http.Handler {
 				TS:   m.ReceivedAt.Format(time.RFC3339),
 			}
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"messages": out,
 			"has_more": hasMore,
@@ -183,6 +218,10 @@ func (s *Server) handleDeleteMessage() http.Handler {
 		queueID := r.PathValue("id")
 		messageID := r.PathValue("mid")
 
+		if !queueIDRegex.MatchString(queueID) {
+			writeError(w, http.StatusNotFound, "queue not found")
+			return
+		}
 		q, err := s.Storage.GetQueue(r.Context(), queueID)
 		if errors.Is(err, queue.ErrQueueNotFound) {
 			writeError(w, http.StatusNotFound, "queue not found")
@@ -208,6 +247,7 @@ func (s *Server) handleDeleteMessage() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
@@ -220,6 +260,13 @@ func (s *Server) handleDeleteMessage() http.Handler {
 func (s *Server) authorizeOwner(r *http.Request, q *queue.Queue) error {
 	sig, pubkey, nonce, err := auth.ParseAuthorization(r.Header.Get("Authorization"))
 	if err != nil {
+		return errAuthDenied
+	}
+	// Explicit length guard: subtle.ConstantTimeCompare returns 1 when both
+	// inputs are empty, which would be a "match" if either side were ever
+	// nil. Verify catches that downstream, but failing here keeps the check
+	// single-step.
+	if len(pubkey) != ed25519.PublicKeySize || len(q.OwnerEd25519Pub) != ed25519.PublicKeySize {
 		return errAuthDenied
 	}
 	if subtle.ConstantTimeCompare(pubkey, q.OwnerEd25519Pub) != 1 {
@@ -242,12 +289,18 @@ func (s *Server) logServerError(op string, err error) {
 	s.Logger.Error("server error", "op", op, "err", err.Error())
 }
 
+// writeJSON commits the headers and best-effort encodes body as JSON.
+// Encode failures here mean the connection broke after the status line
+// was already sent; we cannot recover, but we do want a breadcrumb. The
+// debug call routes through slog.Default(), which the binary's main()
+// is responsible for setting via slog.SetDefault — without that wiring
+// the message goes to the stdlib default handler at info level and is
+// silently dropped.
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		// Response already partially written; nothing actionable for the client.
-		return
+		slog.Default().Debug("response encode failed", "err", err.Error())
 	}
 }
 

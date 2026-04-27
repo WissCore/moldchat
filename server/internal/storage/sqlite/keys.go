@@ -67,27 +67,26 @@ const (
 	infoQueueDB  = "moldd-queue-key-v1|"
 )
 
-// MasterKey returns the SQLCipher hex key (without 'x' wrapper) for the
-// master metadata database.
-func (m MasterSeed) MasterKey() string {
+// MasterKey returns the SQLCipher hex key (without the 'x' wrapper) for
+// the master metadata database. The error is reserved for any future
+// HKDF-side failure; SHA-256 single-block expansion never fails today.
+func (m MasterSeed) MasterKey() (string, error) {
 	return deriveKey(m[:], []byte(infoMasterDB))
 }
 
-// DeriveQueueKey returns the SQLCipher hex key (without 'x' wrapper) for the
-// per-queue database identified by queueID.
-func (m MasterSeed) DeriveQueueKey(queueID string) string {
+// DeriveQueueKey returns the SQLCipher hex key (without the 'x' wrapper)
+// for the per-queue database identified by queueID.
+func (m MasterSeed) DeriveQueueKey(queueID string) (string, error) {
 	return deriveKey(m[:], append([]byte(infoQueueDB), []byte(queueID)...))
 }
 
-// deriveKey runs HKDF-Expand with SHA-256 over the IKM and returns 32 bytes
-// hex-encoded uppercase, ready to be embedded in a SQLCipher PRAGMA key.
-func deriveKey(ikm, info []byte) string {
+// deriveKey runs HKDF-Expand with SHA-256 over the IKM and returns 32
+// bytes hex-encoded, ready to be embedded in a SQLCipher PRAGMA key.
+func deriveKey(ikm, info []byte) (string, error) {
 	r := hkdf.New(sha256.New, ikm, nil, info)
 	out := make([]byte, MasterSeedBytes)
 	if _, err := io.ReadFull(r, out); err != nil {
-		// HKDF.Read on SHA-256 output cannot fail under reasonable constraints
-		// (we request a single-block expansion); treat any I/O error as fatal.
-		panic(fmt.Errorf("hkdf read: %w", err))
+		return "", fmt.Errorf("hkdf read: %w", err)
 	}
-	return hex.EncodeToString(out)
+	return hex.EncodeToString(out), nil
 }

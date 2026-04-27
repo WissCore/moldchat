@@ -19,8 +19,14 @@ func TestDeriveQueueKey_Deterministic(t *testing.T) {
 	for i := range seed {
 		seed[i] = byte(i)
 	}
-	a := seed.DeriveQueueKey("queue-1")
-	b := seed.DeriveQueueKey("queue-1")
+	a, err := seed.DeriveQueueKey("queue-1")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
+	b, err := seed.DeriveQueueKey("queue-1")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
 	if a != b {
 		t.Errorf("derive is not deterministic: %s != %s", a, b)
 	}
@@ -33,8 +39,14 @@ func TestDeriveQueueKey_DistinctPerQueue(t *testing.T) {
 	for i := range seed {
 		seed[i] = byte(i)
 	}
-	a := seed.DeriveQueueKey("queue-1")
-	b := seed.DeriveQueueKey("queue-2")
+	a, err := seed.DeriveQueueKey("queue-1")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
+	b, err := seed.DeriveQueueKey("queue-2")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
 	if a == b {
 		t.Errorf("two queues produced the same key: %s", a)
 	}
@@ -44,9 +56,15 @@ func TestDeriveQueueKey_IsolatedFromMaster(t *testing.T) {
 	t.Parallel()
 
 	var seed sqlite.MasterSeed
-	master := seed.MasterKey()
-	queue := seed.DeriveQueueKey("any-id")
-	if master == queue {
+	master, err := seed.MasterKey()
+	if err != nil {
+		t.Fatalf("MasterKey: %v", err)
+	}
+	queueKey, err := seed.DeriveQueueKey("any-id")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
+	if master == queueKey {
 		t.Errorf("master key collides with queue key: %s", master)
 	}
 }
@@ -55,7 +73,10 @@ func TestDeriveKey_Length(t *testing.T) {
 	t.Parallel()
 
 	var seed sqlite.MasterSeed
-	got := seed.DeriveQueueKey("anything")
+	got, err := seed.DeriveQueueKey("anything")
+	if err != nil {
+		t.Fatalf("DeriveQueueKey: %v", err)
+	}
 	if len(got) != 64 {
 		t.Errorf("hex key length: got %d, want 64", len(got))
 	}

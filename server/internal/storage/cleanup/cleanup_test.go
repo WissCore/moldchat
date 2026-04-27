@@ -123,8 +123,10 @@ func TestTick_AgainstRealSQLiteStore(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
+	x := make([]byte, queue.X25519PubKeyBytes)
+	x[0] = 1
 	keys := queue.OwnerKeys{
-		X25519Pub:  make([]byte, queue.X25519PubKeyBytes),
+		X25519Pub:  x,
 		Ed25519Pub: make([]byte, queue.Ed25519PubKeyBytes),
 	}
 	q, err := st.CreateQueue(ctx, keys)

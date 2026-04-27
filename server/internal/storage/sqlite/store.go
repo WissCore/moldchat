@@ -52,7 +52,11 @@ func New(seed MasterSeed, dataDir string) (*Store, error) {
 	if mkdirErr := os.MkdirAll(abs, dataDirPerm); mkdirErr != nil {
 		return nil, fmt.Errorf("create dataDir: %w", mkdirErr)
 	}
-	masterDB, err := openEncryptedDB(filepath.Join(abs, masterFilename), seed.MasterKey())
+	masterKey, err := seed.MasterKey()
+	if err != nil {
+		return nil, fmt.Errorf("derive master key: %w", err)
+	}
+	masterDB, err := openEncryptedDB(filepath.Join(abs, masterFilename), masterKey)
 	if err != nil {
 		return nil, fmt.Errorf("open master.db: %w", err)
 	}
@@ -113,7 +117,11 @@ func (s *Store) queuePath(queueID string) string {
 // openQueue opens (and initialises if needed) the per-queue database.
 // The returned handle must be closed by the caller.
 func (s *Store) openQueue(queueID string) (*sql.DB, error) {
-	db, err := openEncryptedDB(s.queuePath(queueID), s.seed.DeriveQueueKey(queueID))
+	queueKey, err := s.seed.DeriveQueueKey(queueID)
+	if err != nil {
+		return nil, fmt.Errorf("derive queue key: %w", err)
+	}
+	db, err := openEncryptedDB(s.queuePath(queueID), queueKey)
 	if err != nil {
 		return nil, err
 	}

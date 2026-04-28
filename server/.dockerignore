@@ -1,0 +1,5 @@
+**/*_test.go
+**/testdata/
+dist/
+CHANGELOG.md
+README.md

@@ -73,7 +73,6 @@ func (s *Server) handleCreateQueue() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"queue_id":   q.ID,
 			"expires_at": q.ExpiresAt.Format(time.RFC3339),
@@ -107,7 +106,6 @@ func (s *Server) handleAuthChallenge() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"nonce":      base64.StdEncoding.EncodeToString(nonce),
 			"expires_at": expiresAt.Format(time.RFC3339),
@@ -156,7 +154,6 @@ func (s *Server) handlePutMessage() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"message_id":  m.ID,
 			"accepted_at": m.ReceivedAt.Format(time.RFC3339),
@@ -205,7 +202,6 @@ func (s *Server) handleListMessages() http.Handler {
 				TS:   m.ReceivedAt.Format(time.RFC3339),
 			}
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"messages": out,
 			"has_more": hasMore,
@@ -309,6 +305,7 @@ func (s *Server) logServerError(op string, err error) {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Default().Debug("response encode failed", "err", err.Error())

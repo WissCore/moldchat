@@ -1,6 +1,14 @@
 # Triggered on component-versioned tag pushes (server-vX.Y.Z).
-# Builds the binary, generates an SBOM, and produces SLSA build provenance
-# and SBOM attestations signed via keyless Sigstore (OIDC).
+#
+# Job layout (each artifact is recognised by a different verifier):
+#   build      Builds the binary, generates an SBOM, signs the binary with
+#              cosign keyless (Rekor-anchored .sigstore.json bundle), and
+#              attaches GitHub-native build/SBOM attestations (gh attestation
+#              verify UX).
+#   provenance Calls the SLSA generic generator to emit a .intoto.jsonl
+#              provenance file alongside the binary in the release. Required
+#              for OpenSSF Scorecard's releasesHaveProvenance probe, which
+#              only recognises .intoto.jsonl on release assets.
 name: sigstore-sign
 
 on:
@@ -12,13 +20,15 @@ permissions:
   contents: read
 
 jobs:
-  sign:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
       attestations: write
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
@@ -50,6 +60,16 @@ jobs:
           output-file: dist/moldd.spdx.json
           upload-release-assets: false
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
+
+      - name: Sign binary (keyless, bundle)
+        working-directory: dist
+        run: |
+          cosign sign-blob --yes \
+            --bundle moldd.sigstore.json \
+            moldd
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4
         with:
@@ -61,6 +81,12 @@ jobs:
           subject-path: dist/moldd
           sbom-path: dist/moldd.spdx.json
 
+      - name: Compute artifact hash for provenance job
+        id: hash
+        working-directory: dist
+        run: |
+          echo "hashes=$(sha256sum moldd | base64 -w0)" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -68,5 +94,18 @@ jobs:
           gh release upload "${{ github.ref_name }}" \
             dist/moldd \
             dist/moldd.spdx.json \
+            dist/moldd.sigstore.json \
             --repo "${{ github.repository }}" \
             --clobber
+
+  provenance:
+    needs: [build]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    # SLSA trusted-builder is identified by tag ref; pinning by SHA breaks slsa-verifier's BuilderID check.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0  # zizmor: ignore[unpinned-uses]
+    with:
+      base64-subjects: ${{ needs.build.outputs.hashes }}
+      upload-assets: true

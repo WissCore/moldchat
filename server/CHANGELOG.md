@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/WissCore/moldchat/compare/server-v0.1.4...server-v0.1.5) (2026-04-28)
+
+
+### Bug Fixes
+
+* **api:** apply Cache-Control no-store to all JSON responses ([#31](https://github.com/WissCore/moldchat/issues/31)) ([ffdbc23](https://github.com/WissCore/moldchat/commit/ffdbc23d1ec3455468337aa11ed132dc7eaf1fcf))
+
 ## [0.1.4](https://github.com/WissCore/moldchat/compare/server-v0.1.3...server-v0.1.4) (2026-04-28)
 
 

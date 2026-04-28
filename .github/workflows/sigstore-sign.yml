@@ -15,6 +15,7 @@ on:
   push:
     tags:
       - 'server-v*'
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/WissCore/moldchat/compare/server-v0.1.3...server-v0.1.4) (2026-04-28)
+
+
+### CI
+
+* add cosign + SLSA provenance to releases, pin Docker by digest ([#26](https://github.com/WissCore/moldchat/issues/26)) ([68cd3b1](https://github.com/WissCore/moldchat/commit/68cd3b100bc368b00d2f2fed4a3654db20cbd0b0))
+
 ## [0.1.3](https://github.com/WissCore/moldchat/compare/server-v0.1.2...server-v0.1.3) (2026-04-28)
 
 

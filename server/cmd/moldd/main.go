@@ -8,6 +8,11 @@
 // the MOLDD_STORAGE environment variable: "memory" (the default, ephemeral)
 // or "sqlite" (persistent, encrypted with SQLCipher and an HKDF-derived key
 // per queue, requires MOLDD_MASTER_SEED and MOLDD_DATA_DIR).
+//
+// Online backup is opt-in via MOLDD_SNAPSHOT_INTERVAL (a Go duration, e.g.
+// "60s") and MOLDD_SNAPSHOT_DIR (an absolute path). Both must be set and the
+// storage backend must be sqlite; an offline tool such as restic is expected
+// to ship the resulting directory to remote storage.
 package main
 
 import (
@@ -30,6 +35,7 @@ import (
 	"github.com/WissCore/moldchat/server/internal/storage"
 	"github.com/WissCore/moldchat/server/internal/storage/cleanup"
 	"github.com/WissCore/moldchat/server/internal/storage/memory"
+	"github.com/WissCore/moldchat/server/internal/storage/snapshot"
 	"github.com/WissCore/moldchat/server/internal/storage/sqlite"
 )
 
@@ -41,7 +47,7 @@ const (
 	idleTimeout            = 120 * time.Second
 	maxHeaderBytes         = 16 * 1024
 	shutdownTimeout        = 5 * time.Second
-	cleanupShutdownTimeout = 10 * time.Second
+	runnersShutdownTimeout = 10 * time.Second
 	defaultCleanupInterval = 5 * time.Minute
 )
 
@@ -72,6 +78,12 @@ func run() int {
 		return 1
 	}
 
+	runSnapshot, err := initSnapshot(store, logger)
+	if err != nil {
+		logger.Error("init snapshot", "err", err.Error())
+		return 1
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
 
@@ -98,23 +110,31 @@ func run() int {
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 
-	// Ordered shutdown: cancel cleanup ctx → wait for cleanup goroutine to
-	// finish any in-flight Tick → only then close the store. Closing the
-	// store while a Tick is mid-query produces undefined behaviour in the
-	// SQL driver, so the WaitGroup gate is mandatory, not cosmetic. The
-	// wait is itself bounded so a wedged SQL operation cannot hold the
-	// process up forever; if the bound is exceeded we close the store
-	// anyway and let the runtime tear the goroutine down.
-	var cleanupWg sync.WaitGroup
+	// Ordered shutdown: cancel runners ctx → wait for every background
+	// runner (cleanup, snapshot, ...) to finish any in-flight Tick → only
+	// then close the store. Closing the store while a Tick is mid-query
+	// produces undefined behaviour in the SQL driver, so the WaitGroup
+	// gate is mandatory, not cosmetic. The wait is bounded so a wedged
+	// SQL operation cannot hold the process up forever; if the bound is
+	// exceeded we close the store anyway and let the runtime tear the
+	// goroutines down.
+	var runnersWg sync.WaitGroup
 	defer func() {
-		shutdownCleanly(rootCancel, &cleanupWg, closeStore, cleanupShutdownTimeout, logger)
+		shutdownCleanly(rootCancel, &runnersWg, closeStore, runnersShutdownTimeout, logger)
 	}()
 
 	if runCleanup != nil {
-		cleanupWg.Add(1)
+		runnersWg.Add(1)
 		go func() {
-			defer cleanupWg.Done()
+			defer runnersWg.Done()
 			runCleanup(rootCtx)
+		}()
+	}
+	if runSnapshot != nil {
+		runnersWg.Add(1)
+		go func() {
+			defer runnersWg.Done()
+			runSnapshot(rootCtx)
 		}()
 	}
 
@@ -152,22 +172,22 @@ func addr() string {
 	return defaultAddr
 }
 
-// shutdownCleanly cancels the cleanup-runner context, waits for it to
-// drain (bounded by waitTimeout), and only then closes the store.
-// Extracted into a function so the timeout path is unit-testable
+// shutdownCleanly cancels the background-runner context, waits for the
+// runners to drain (bounded by waitTimeout), and only then closes the
+// store. Extracted into a function so the timeout path is unit-testable
 // without spinning up the whole process. logger is optional for tests.
-func shutdownCleanly(rootCancel context.CancelFunc, cleanupWg *sync.WaitGroup, closeStore func() error, waitTimeout time.Duration, logger *slog.Logger) {
+func shutdownCleanly(rootCancel context.CancelFunc, runnersWg *sync.WaitGroup, closeStore func() error, waitTimeout time.Duration, logger *slog.Logger) {
 	rootCancel()
 	done := make(chan struct{})
 	go func() {
-		cleanupWg.Wait()
+		runnersWg.Wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(waitTimeout):
 		if logger != nil {
-			logger.Warn("cleanup goroutine did not finish before timeout, forcing store close")
+			logger.Warn("background runners did not finish before timeout, forcing store close")
 		}
 	}
 	if err := closeStore(); err != nil && logger != nil {
@@ -229,4 +249,37 @@ func initStorage(logger *slog.Logger) (
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown MOLDD_STORAGE backend: %q (valid: memory, sqlite)", backend)
 	}
+}
+
+// initSnapshot constructs the periodic snapshot runner when both
+// MOLDD_SNAPSHOT_INTERVAL and MOLDD_SNAPSHOT_DIR are set and the storage
+// backend implements snapshot.Snapshotter (currently *sqlite.Store).
+// Returns nil when snapshotting is disabled by configuration.
+func initSnapshot(store storage.Storage, logger *slog.Logger) (func(context.Context), error) {
+	intervalStr := strings.TrimSpace(os.Getenv("MOLDD_SNAPSHOT_INTERVAL"))
+	dst := strings.TrimSpace(os.Getenv("MOLDD_SNAPSHOT_DIR"))
+	if intervalStr == "" && dst == "" {
+		return nil, nil
+	}
+	if intervalStr == "" || dst == "" {
+		return nil, errors.New("MOLDD_SNAPSHOT_INTERVAL and MOLDD_SNAPSHOT_DIR must both be set or both be unset")
+	}
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("MOLDD_SNAPSHOT_INTERVAL: %w", err)
+	}
+	if interval <= 0 {
+		return nil, errors.New("MOLDD_SNAPSHOT_INTERVAL must be positive")
+	}
+	snapshotter, ok := store.(snapshot.Snapshotter)
+	if !ok {
+		return nil, errors.New("MOLDD_SNAPSHOT_DIR is set but the configured storage backend does not support snapshots")
+	}
+	runner := &snapshot.Runner{
+		Snapshotter: snapshotter,
+		Dst:         dst,
+		Interval:    interval,
+		Logger:      logger,
+	}
+	return runner.Run, nil
 }

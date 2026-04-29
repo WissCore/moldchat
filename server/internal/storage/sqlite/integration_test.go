@@ -49,13 +49,13 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateQueue: %v", err)
 	}
-	if _, err := st.PutMessage(ctx, q.ID, []byte("hello")); err != nil {
-		t.Fatalf("PutMessage: %v", err)
+	if _, perr := st.PutMessage(ctx, q.ID, []byte("hello")); perr != nil {
+		t.Fatalf("PutMessage: %v", perr)
 	}
 
 	// Phase 2: durability across restart.
-	if err := st.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
+	if cerr := st.Close(); cerr != nil {
+		t.Fatalf("first Close: %v", cerr)
 	}
 	st2, err := sqlite.New(seed, dir)
 	if err != nil {

@@ -1,0 +1,93 @@
+name: backup-roundtrip
+
+on:
+  pull_request:
+    paths:
+      - 'server/internal/storage/sqlite/**'
+      - 'server/go.mod'
+      - 'server/go.sum'
+      - '.github/workflows/backup-roundtrip.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'server/internal/storage/sqlite/**'
+      - 'server/go.mod'
+      - 'server/go.sum'
+      - '.github/workflows/backup-roundtrip.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  roundtrip:
+    name: snapshot -> restic -> restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      minio:
+        image: bitnami/minio:2025
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: ci
+          MINIO_ROOT_PASSWORD: cipassword
+
+    env:
+      RESTIC_VERSION: '0.18.1'
+      RESTIC_REPOSITORY: 's3:http://localhost:9000/restic-roundtrip'
+      RESTIC_PASSWORD: 'ci-test-password'
+      AWS_ACCESS_KEY_ID: ci
+      AWS_SECRET_ACCESS_KEY: cipassword
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
+        with:
+          go-version-file: server/go.mod
+          cache: true
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/live; then
+              echo "MinIO ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become ready" >&2
+          exit 1
+
+      - name: Provision bucket
+        run: |
+          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          chmod +x /tmp/mc
+          /tmp/mc alias set ci http://localhost:9000 ci cipassword
+          /tmp/mc mb ci/restic-roundtrip
+
+      - name: Install restic
+        run: |
+          curl -fsSL "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+            | bunzip2 - > /tmp/restic
+          chmod +x /tmp/restic
+          sudo mv /tmp/restic /usr/local/bin/restic
+          restic version
+
+      - name: Run roundtrip integration test
+        working-directory: server
+        run: go test -tags=integration -race -count=1 -run TestBackupRoundtrip ./internal/storage/sqlite/...

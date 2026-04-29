@@ -28,17 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    services:
-      minio:
-        image: bitnami/minio:2025
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: ci
-          MINIO_ROOT_PASSWORD: cipassword
-
     env:
       RESTIC_VERSION: '0.18.1'
+      MINIO_TAG: 'RELEASE.2025-09-07T16-13-09Z'
       RESTIC_REPOSITORY: 's3:http://localhost:9000/restic-roundtrip'
       RESTIC_PASSWORD: 'ci-test-password'
       AWS_ACCESS_KEY_ID: ci
@@ -61,6 +53,16 @@ jobs:
           go-version-file: server/go.mod
           cache: true
 
+      # The official MinIO image requires `server <path>` as its command,
+      # which the GitHub Actions services block cannot supply, so MinIO
+      # is started via plain docker run.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=ci \
+            -e MINIO_ROOT_PASSWORD=cipassword \
+            "minio/minio:${MINIO_TAG}" server /data
+
       - name: Wait for MinIO
         run: |
           for i in $(seq 1 30); do
@@ -71,6 +73,7 @@ jobs:
             sleep 2
           done
           echo "MinIO did not become ready" >&2
+          docker logs minio || true
           exit 1
 
       - name: Provision bucket

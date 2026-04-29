@@ -1,0 +1,68 @@
+# Production reference compose: moldd plus a restic sidecar that backs up the
+# online snapshots written by moldd to one or more S3-compatible buckets.
+#
+# Sequential independent backups (no `restic copy`) are used so each
+# jurisdiction holds a self-contained encrypted repository. Loss or
+# compromise of any one provider does not affect the others.
+#
+# Before bringing the stack up:
+#   - copy ./restic/restic.env.example to ./restic/restic.env
+#   - fill in real credentials and keep that file 0600
+#   - export MOLDD_MASTER_SEED in the environment that runs `docker compose`
+#
+# Tested with docker compose v2.
+
+services:
+  moldd:
+    image: ghcr.io/wisscore/moldd:${MOLDD_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      MOLDD_STORAGE: sqlite
+      MOLDD_DATA_DIR: /var/lib/moldd
+      MOLDD_SNAPSHOT_DIR: /var/lib/moldd/snap
+      MOLDD_SNAPSHOT_INTERVAL: ${MOLDD_SNAPSHOT_INTERVAL:-60s}
+      MOLDD_LOG_LEVEL: ${MOLDD_LOG_LEVEL:-info}
+      MOLDD_MASTER_SEED: ${MOLDD_MASTER_SEED:?MOLDD_MASTER_SEED is required}
+    volumes:
+      - moldd-data:/var/lib/moldd
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  restic:
+    image: restic/restic:${RESTIC_TAG:-0.18.1}
+    restart: unless-stopped
+    depends_on:
+      - moldd
+    # Same UID as the distroless `nonroot` user that moldd runs as so
+    # the read-only volume mount sees readable 0600 files; running the
+    # restic image as the upstream-default root would require
+    # CAP_DAC_OVERRIDE which is incompatible with cap_drop: ALL.
+    user: "65532:65532"
+    environment:
+      # restic caches pack metadata locally; redirect into the tmpfs
+      # below so the container filesystem can stay read-only.
+      XDG_CACHE_HOME: /tmp
+    env_file:
+      - ./restic/restic.env
+    volumes:
+      - moldd-data:/data:ro
+      - ./restic/run-cycle.sh:/usr/local/bin/run-cycle.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/run-cycle.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  moldd-data:
+    driver: local

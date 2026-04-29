@@ -10,6 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License"></a>
   <a href="https://github.com/WissCore/moldchat/releases"><img src="https://img.shields.io/github/v/release/WissCore/moldchat?include_prereleases" alt="Release"></a>
   <a href="https://github.com/WissCore/moldchat/actions"><img src="https://img.shields.io/github/actions/workflow/status/WissCore/moldchat/ci.yml?branch=main" alt="CI"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/WissCore/moldchat"><img src="https://api.scorecard.dev/projects/github.com/WissCore/moldchat/badge" alt="OpenSSF Scorecard"></a>
   <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-orange" alt="Security policy"></a>
 </p>
 

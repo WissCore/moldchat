@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/WissCore/moldchat/compare/server-v0.1.5...server-v0.1.6) (2026-04-29)
+
+
+### Features
+
+* add SQLCipher snapshot pipeline for restic-based backups ([#34](https://github.com/WissCore/moldchat/issues/34)) ([cdfe27d](https://github.com/WissCore/moldchat/commit/cdfe27df3d6241389d2f5abd93e1c36199771ddd))
+
 ## [0.1.5](https://github.com/WissCore/moldchat/compare/server-v0.1.4...server-v0.1.5) (2026-04-28)
 
 

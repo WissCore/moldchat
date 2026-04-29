@@ -33,7 +33,7 @@ jobs:
       MINIO_TAG: 'RELEASE.2025-09-07T16-13-09Z'
       RESTIC_REPOSITORY: 's3:http://localhost:9000/restic-roundtrip'
       RESTIC_PASSWORD: 'ci-test-password'
-      AWS_ACCESS_KEY_ID: ci
+      AWS_ACCESS_KEY_ID: ciuser
       AWS_SECRET_ACCESS_KEY: cipassword
 
     steps:
@@ -59,7 +59,7 @@ jobs:
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=ci \
+            -e MINIO_ROOT_USER=ciuser \
             -e MINIO_ROOT_PASSWORD=cipassword \
             "minio/minio:${MINIO_TAG}" server /data
 
@@ -80,8 +80,8 @@ jobs:
         run: |
           curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
           chmod +x /tmp/mc
-          /tmp/mc alias set ci http://localhost:9000 ci cipassword
-          /tmp/mc mb ci/restic-roundtrip
+          /tmp/mc alias set local http://localhost:9000 ciuser cipassword
+          /tmp/mc mb local/restic-roundtrip
 
       - name: Install restic
         run: |

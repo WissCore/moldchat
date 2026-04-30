@@ -125,6 +125,27 @@ func (s *Server) handlePutMessage() http.Handler {
 			writeError(w, http.StatusNotFound, "queue not found")
 			return
 		}
+		// Anonauth gate: enforced only when the server is configured
+		// with both an Issuer and a Verifier. The token is checked
+		// BEFORE the body is read for the same reason as the queue
+		// id check above — an unauthenticated client must not be
+		// able to make us absorb a 64 KiB body just to fail at the
+		// last step. The verifier collapses every failure mode
+		// (missing header, bad base64, wrong mac, replayed mac) to
+		// a single 401 so the response is not a side channel.
+		if s.AnonauthEnabled() {
+			input, mac, parseErr := parseAnonauthToken(r.Header.Get(AnonauthHeader))
+			if parseErr != nil {
+				s.AuthFailureCount.Add(1)
+				writeError(w, http.StatusUnauthorized, "anonymous token required")
+				return
+			}
+			if verifyErr := s.Verifier.Verify(input, mac); verifyErr != nil {
+				s.AuthFailureCount.Add(1)
+				writeError(w, http.StatusUnauthorized, "anonymous token rejected")
+				return
+			}
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, queue.MaxBlobSize+1)
 		blob, err := io.ReadAll(r.Body)
 		if err != nil {

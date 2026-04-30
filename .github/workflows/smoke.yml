@@ -1,0 +1,41 @@
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 3
+# feature-level validation. Builds the moldd binary and exercises
+# every smoke case registered in server/internal/smoke/.
+name: smoke
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: server smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
+        with:
+          go-version-file: server/go.mod
+
+      - name: Run smoke suite
+        # Mirrors `mise run smoke` exactly. Adding a new smoke
+        # scenario only requires dropping a *_smoke.go file in
+        # server/internal/smoke/ — no edits here.
+        run: go test -tags smoke -count=1 -timeout=2m ./internal/smoke/...

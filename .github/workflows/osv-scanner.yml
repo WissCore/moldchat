@@ -1,22 +1,22 @@
-# osv-scanner is invoked via the binary installed by mise (the version is pinned in
-# .mise.toml + mise.lock), so the local pre-push hook and CI run the exact same
-# scanner with the exact same arguments.
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 1 security
+# scan on every PR and main push. Also runs standalone every Monday
+# at 05:13 UTC to re-scan main against the freshly updated OSV
+# database (catches new advisories against unchanged dependencies).
+#
+# osv-scanner is invoked via the binary installed by mise (the
+# version is pinned in .mise.toml + mise.lock), so the local
+# pre-push hook and CI run the exact same scanner with the exact
+# same arguments.
 name: osv-scanner
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
   schedule:
     - cron: '13 5 * * 1'  # Monday 05:13 UTC
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   scan:

@@ -1,26 +1,17 @@
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 3
+# feature-level validation. Spins up MinIO, exercises the full
+# snapshot → restic backup → restore round-trip against a real
+# encrypted SQLCipher store. Heavy enough (~5 minutes) that we
+# defer it behind build-test in the orchestrator so a failed
+# build short-circuits the suite first.
 name: backup-roundtrip
 
 on:
-  pull_request:
-    paths:
-      - 'server/internal/storage/sqlite/**'
-      - 'server/go.mod'
-      - 'server/go.sum'
-      - '.github/workflows/backup-roundtrip.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'server/internal/storage/sqlite/**'
-      - 'server/go.mod'
-      - 'server/go.sum'
-      - '.github/workflows/backup-roundtrip.yml'
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   roundtrip:

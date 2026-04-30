@@ -33,3 +33,7 @@ GOSUMDB  = "sum.golang.org"
 
 # Disable Gradle daemon in CI-like local runs to make builds deterministic
 GRADLE_OPTS = "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=4"
+
+[tasks.smoke]
+description = "Run binary smoke tests against a freshly built moldd. Mirrors the CI smoke job."
+run = "go -C server test -tags smoke -count=1 -timeout=2m ./internal/smoke/..."

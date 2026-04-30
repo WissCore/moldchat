@@ -1,19 +1,16 @@
-# gitleaks is invoked via the binary installed by mise (the version is pinned in
-# .mise.toml + mise.lock), so the local pre-push hook and CI run the exact same
-# scanner with the exact same arguments.
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 1 fast
+# check. gitleaks is invoked via the binary installed by mise (the
+# version is pinned in .mise.toml + mise.lock), so the local
+# pre-push hook and CI run the exact same scanner with the exact
+# same arguments.
 name: gitleaks
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   gitleaks:

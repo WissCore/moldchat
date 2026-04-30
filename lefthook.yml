@@ -21,13 +21,17 @@ pre-commit:
       run: go -C server vet ./...
     golangci-lint:
       glob: "*.go"
-      run: cd server && golangci-lint run ./...
+      # --build-tags smoke makes the linter analyze the smoke
+      # package too; the narrow per-rule exclusions in
+      # .golangci.yml then handle the test-pattern false positives.
+      # gosec runs as part of golangci-lint's enabled linter set;
+      # there is no separate standalone gosec hook because that
+      # would duplicate the work and require a parallel exclusion
+      # config.
+      run: cd server && golangci-lint run --build-tags smoke ./...
       skip:
         - merge
         - rebase
-    gosec:
-      glob: "*.go"
-      run: gosec -quiet ./server/...
     ktlint:
       glob: "*.kt"
       run: ktlint {staged_files}

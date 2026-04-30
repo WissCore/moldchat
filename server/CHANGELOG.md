@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/WissCore/moldchat/compare/server-v0.1.6...server-v0.1.7) (2026-04-30)
+
+
+### Features
+
+* **server:** anonymous credentials, smoke suite, and ci orchestrator ([#38](https://github.com/WissCore/moldchat/issues/38)) ([ad1b46f](https://github.com/WissCore/moldchat/commit/ad1b46f1e00580d98a3d970ef50fd44cfdec8910))
+
 ## [0.1.6](https://github.com/WissCore/moldchat/compare/server-v0.1.5...server-v0.1.6) (2026-04-29)
 
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.8](https://github.com/WissCore/moldchat/compare/server-v0.1.7...server-v0.1.8) (2026-04-30)
+
+
+### Features
+
+* add SQLCipher snapshot pipeline for restic-based backups ([#34](https://github.com/WissCore/moldchat/issues/34)) ([cdfe27d](https://github.com/WissCore/moldchat/commit/cdfe27df3d6241389d2f5abd93e1c36199771ddd))
+* **server:** anonymous credentials, smoke suite, and ci orchestrator ([#38](https://github.com/WissCore/moldchat/issues/38)) ([ad1b46f](https://github.com/WissCore/moldchat/commit/ad1b46f1e00580d98a3d970ef50fd44cfdec8910))
+
+
+### Bug Fixes
+
+* **api:** apply Cache-Control no-store to all JSON responses ([#31](https://github.com/WissCore/moldchat/issues/31)) ([ffdbc23](https://github.com/WissCore/moldchat/commit/ffdbc23d1ec3455468337aa11ed132dc7eaf1fcf))
+
+
+### CI
+
+* add cosign + SLSA provenance to releases, pin Docker by digest ([#26](https://github.com/WissCore/moldchat/issues/26)) ([68cd3b1](https://github.com/WissCore/moldchat/commit/68cd3b100bc368b00d2f2fed4a3654db20cbd0b0))
+* publish signed container image to ghcr.io on release ([#25](https://github.com/WissCore/moldchat/issues/25)) ([22550b5](https://github.com/WissCore/moldchat/commit/22550b56181cab51591964a485e1ca3a8053d605))
+
 ## [0.1.7](https://github.com/WissCore/moldchat/compare/server-v0.1.6...server-v0.1.7) (2026-04-30)
 
 

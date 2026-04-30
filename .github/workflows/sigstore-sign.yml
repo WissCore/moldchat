@@ -105,8 +105,12 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    # SLSA trusted-builder is identified by tag ref; pinning by SHA breaks slsa-verifier's BuilderID check.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # v2.1.0  # zizmor: ignore[unpinned-uses]
+    # SLSA trusted-builder is identified by tag ref; pinning by SHA
+    # breaks both slsa-verifier's BuilderID check AND the upstream
+    # builder-fetch.sh download (slsa-framework/slsa-github-generator#4216,
+    # error: "slsa-generator-generic-linux-amd64: No such file or
+    # directory"). The version tag is the load-bearing pin here.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0  # zizmor: ignore[unpinned-uses]
     with:
       base64-subjects: "${{ needs.build.outputs.hashes }}"
       upload-assets: true

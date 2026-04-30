@@ -13,6 +13,14 @@
 // "60s") and MOLDD_SNAPSHOT_DIR (an absolute path). Both must be set and the
 // storage backend must be sqlite; an offline tool such as restic is expected
 // to ship the resulting directory to remote storage.
+//
+// Anonymous-credential gating on PUT /v1/queues/{id}/messages is opt-in via
+// MOLDD_ANONAUTH=enforce together with MOLDD_ANONAUTH_DATA_DIR. When enabled
+// the issuer derives its POPRF key from MOLDD_MASTER_SEED and persists
+// pseudonyms in an encrypted SQLite file under the data dir. Tunable knobs:
+// MOLDD_ANONAUTH_EPOCH (Go duration, default 1h), MOLDD_ANONAUTH_PSEUDONYM_TTL
+// (Go duration, default 720h), MOLDD_ANONAUTH_TOKENS_PER_EPOCH (uint32,
+// default 100), MOLDD_ANONAUTH_POW_BITS (1..32, default 20).
 package main
 
 import (
@@ -29,6 +37,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/WissCore/moldchat/server/internal/anonauth"
+	"github.com/WissCore/moldchat/server/internal/anonauth/sqlitestore"
 	v1 "github.com/WissCore/moldchat/server/internal/api/v1"
 	"github.com/WissCore/moldchat/server/internal/auth"
 	"github.com/WissCore/moldchat/server/internal/health"
@@ -84,10 +94,22 @@ func run() int {
 		return 1
 	}
 
+	issuer, verifier, runAnonauthCleanup, closeAnonauth, err := initAnonauth(logger)
+	if err != nil {
+		logger.Error("init anonauth", "err", err.Error())
+		return 1
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler())
 
-	api := &v1.Server{Storage: store, Auth: auth.NewIssuer(), Logger: logger}
+	api := &v1.Server{
+		Storage:  store,
+		Auth:     auth.NewIssuer(),
+		Logger:   logger,
+		Issuer:   issuer,
+		Verifier: verifier,
+	}
 	api.Mount(mux)
 
 	srv := &http.Server{
@@ -117,10 +139,18 @@ func run() int {
 	// gate is mandatory, not cosmetic. The wait is bounded so a wedged
 	// SQL operation cannot hold the process up forever; if the bound is
 	// exceeded we close the store anyway and let the runtime tear the
-	// goroutines down.
+	// goroutines down. closeAnonauth runs after closeStore so the
+	// pseudonym DB is shut down on the same code path.
 	var runnersWg sync.WaitGroup
 	defer func() {
-		shutdownCleanly(rootCancel, &runnersWg, closeStore, runnersShutdownTimeout, logger)
+		shutdownCleanly(rootCancel, &runnersWg, func() error {
+			storeErr := closeStore()
+			anonErr := closeAnonauth()
+			if storeErr != nil {
+				return storeErr
+			}
+			return anonErr
+		}, runnersShutdownTimeout, logger)
 	}()
 
 	if runCleanup != nil {
@@ -135,6 +165,13 @@ func run() int {
 		go func() {
 			defer runnersWg.Done()
 			runSnapshot(rootCtx)
+		}()
+	}
+	if runAnonauthCleanup != nil {
+		runnersWg.Add(1)
+		go func() {
+			defer runnersWg.Done()
+			runAnonauthCleanup(rootCtx)
 		}()
 	}
 
@@ -249,6 +286,140 @@ func initStorage(logger *slog.Logger) (
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown MOLDD_STORAGE backend: %q (valid: memory, sqlite)", backend)
 	}
+}
+
+// initAnonauth constructs the anonymous-credential issuer/verifier
+// pair when MOLDD_ANONAUTH=enforce. The issuer key and pseudonym
+// database are derived from the same MOLDD_MASTER_SEED already used
+// by the SQLCipher backend, but via a dedicated HKDF info string so
+// the two derivations cannot collide. Returns nil issuer + nil
+// verifier when the feature is disabled (the default), in which case
+// the API server treats the X-Anonauth-Token header as not required.
+//
+// runCleanup is the periodic pseudonym-expiry sweeper; nil when the
+// feature is disabled. closeAnonauth releases the pseudonym backing
+// store; it returns nil when the feature is disabled.
+const defaultAnonauthCleanupInterval = 15 * time.Minute
+
+func initAnonauth(logger *slog.Logger) (
+	issuer *anonauth.Issuer,
+	verifier *anonauth.Verifier,
+	runCleanup func(context.Context),
+	closeAnonauth func() error,
+	err error,
+) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("MOLDD_ANONAUTH")))
+	switch mode {
+	case "", "off", "disabled":
+		return nil, nil, nil, func() error { return nil }, nil
+	case "enforce":
+	default:
+		return nil, nil, nil, nil, fmt.Errorf("MOLDD_ANONAUTH: unknown value %q (valid: off, enforce)", mode)
+	}
+
+	seed, seedErr := sqlite.LoadMasterSeed()
+	if seedErr != nil {
+		return nil, nil, nil, nil, fmt.Errorf("anonauth: %w", seedErr)
+	}
+	dataDir := strings.TrimSpace(os.Getenv("MOLDD_ANONAUTH_DATA_DIR"))
+	if dataDir == "" {
+		return nil, nil, nil, nil, errors.New("anonauth: MOLDD_ANONAUTH_DATA_DIR is required when MOLDD_ANONAUTH=enforce")
+	}
+
+	epochDur, epochErr := durationFromEnv("MOLDD_ANONAUTH_EPOCH", time.Hour)
+	if epochErr != nil {
+		return nil, nil, nil, nil, epochErr
+	}
+	ttlDur, ttlErr := durationFromEnv("MOLDD_ANONAUTH_PSEUDONYM_TTL", 30*24*time.Hour)
+	if ttlErr != nil {
+		return nil, nil, nil, nil, ttlErr
+	}
+	tokensPer, tokErr := uint32FromEnv("MOLDD_ANONAUTH_TOKENS_PER_EPOCH", 100)
+	if tokErr != nil {
+		return nil, nil, nil, nil, tokErr
+	}
+	powBits, powErr := uint8FromEnv("MOLDD_ANONAUTH_POW_BITS", anonauth.DefaultDifficultyBits)
+	if powErr != nil {
+		return nil, nil, nil, nil, powErr
+	}
+	cfg := anonauth.IssuerConfig{
+		Epoch:             epochDur,
+		PseudonymTTL:      ttlDur,
+		TokensPerEpoch:    tokensPer,
+		PoWDifficultyBits: powBits,
+	}
+
+	key, keyErr := anonauth.DeriveIssuerKey(seed[:])
+	if keyErr != nil {
+		return nil, nil, nil, nil, fmt.Errorf("anonauth derive key: %w", keyErr)
+	}
+	store, storeErr := sqlitestore.New([32]byte(seed), dataDir)
+	if storeErr != nil {
+		return nil, nil, nil, nil, fmt.Errorf("anonauth open store: %w", storeErr)
+	}
+	iss, issErr := anonauth.NewIssuer(cfg, key, store)
+	if issErr != nil {
+		_ = store.Close()
+		return nil, nil, nil, nil, fmt.Errorf("anonauth issuer: %w", issErr)
+	}
+	ver, verErr := anonauth.NewVerifier(anonauth.VerifierConfig{Epoch: cfg.Epoch}, key)
+	if verErr != nil {
+		_ = store.Close()
+		return nil, nil, nil, nil, fmt.Errorf("anonauth verifier: %w", verErr)
+	}
+	cleanup := &anonauth.CleanupRunner{
+		Store:    store,
+		Interval: defaultAnonauthCleanupInterval,
+		Logger:   logger,
+	}
+	logger.Info("anonauth enforced",
+		"epoch", cfg.Epoch.String(),
+		"tokens_per_epoch", cfg.TokensPerEpoch,
+		"pseudonym_ttl", cfg.PseudonymTTL.String(),
+		"pow_bits", cfg.PoWDifficultyBits,
+		"cleanup_interval", defaultAnonauthCleanupInterval.String(),
+	)
+	return iss, ver, cleanup.Run, store.Close, nil
+}
+
+// durationFromEnv reads a Go duration from the named env var. An
+// empty value falls back to def; an unparsable value returns an
+// error so the caller can fail startup with a normal exit code
+// rather than panicking the process.
+func durationFromEnv(name string, def time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("env %s: %w", name, err)
+	}
+	return d, nil
+}
+
+func uint32FromEnv(name string, def uint32) (uint32, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	var v uint64
+	if _, err := fmt.Sscanf(raw, "%d", &v); err != nil || v == 0 || v > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("env %s: invalid uint32 %q", name, raw)
+	}
+	return uint32(v), nil
+}
+
+func uint8FromEnv(name string, def uint8) (uint8, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	var v uint64
+	if _, err := fmt.Sscanf(raw, "%d", &v); err != nil || v == 0 || v > 255 {
+		return 0, fmt.Errorf("env %s: invalid uint8 %q", name, raw)
+	}
+	return uint8(v), nil
 }
 
 // initSnapshot constructs the periodic snapshot runner when both

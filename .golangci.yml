@@ -53,6 +53,27 @@ linters:
       disable:
         - fieldalignment
 
+  exclusions:
+    rules:
+      # Smoke tests spawn the moldd binary they themselves built in
+      # TestMain; the path is fully under the suite's control. G204
+      # ("subprocess launched with variable") is a structural false
+      # positive against this pattern. Scope is deliberately narrow:
+      # only the smoke package, only that rule.
+      - path: server/internal/smoke/
+        text: "G204"
+        linters:
+          - gosec
+      # The smoke registry dispatches each case as a top-level test
+      # body; the linter sees the *_smoke.go Run functions as helpers
+      # because they take *testing.T but never call t.Helper(). They
+      # are not helpers — they ARE the test bodies — so a helper
+      # frame skip would degrade failure messages. Scope is narrow:
+      # only the smoke package.
+      - path: server/internal/smoke/
+        linters:
+          - thelper
+
 formatters:
   enable:
     - gofumpt

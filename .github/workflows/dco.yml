@@ -1,15 +1,15 @@
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 1 fast
+# check, gated on github.event_name == 'pull_request' because the
+# job below reads pull_request.base.sha / head.sha which are empty
+# on push events.
 name: dco
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   dco:

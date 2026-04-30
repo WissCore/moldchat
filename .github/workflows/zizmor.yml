@@ -1,17 +1,15 @@
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 1 fast
+# check. zizmor lints the workflow files themselves for actions
+# misuse and supply-chain footguns.
 name: zizmor
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
   security-events: write
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   zizmor:

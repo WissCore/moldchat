@@ -1,19 +1,18 @@
+# Reusable: invoked by .github/workflows/ci.yml as a Tier 1 security
+# scan on every PR and main push. Also runs standalone every Monday
+# at 05:23 UTC to re-analyse main with the latest CodeQL database
+# even when no code has changed (catches newly disclosed sinks
+# affecting previously-shipped code).
 name: codeql
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
   schedule:
     - cron: '23 5 * * 1'  # Monday 05:23 UTC
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   analyze:

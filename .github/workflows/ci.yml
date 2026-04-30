@@ -1,9 +1,31 @@
 name: ci
 
+# Single orchestrator entry point for every PR and every push to main.
+# This is the only PR-triggered workflow in the repository — every
+# other workflow under .github/workflows/ either:
+#
+#   - declares "on: workflow_call:" and is invoked from below by a
+#     `uses:` step, or
+#   - has its own non-PR trigger (release, tag, schedule) and is
+#     deliberately scoped to that lifecycle.
+#
+# Branch protection should require exactly one status check from
+# this file: ci-success. That job depends on every other job in the
+# graph and fails if any of them does not succeed, so a single
+# required check keeps protection rules simple while still gating
+# on the entire suite.
+#
+# Operator migration: when this lands, replace every former
+# per-workflow required status (ci, gitleaks, zizmor, codeql,
+# osv-scanner, dco, smoke, backup-roundtrip) with a single required
+# status named "ci / ci-success". See docs/runbook/branch-protection.md
+# for the operator-facing guide.
+
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,34 +35,207 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  server:
-    name: server (Go)
+  # Tier 0 — detect which paths changed so the heavy feature
+  # validations (backup-roundtrip, docker) can be skipped on PRs
+  # that don't touch the relevant areas. workflow_call does not
+  # propagate the caller's `paths:` filter to the called workflow,
+  # so the gate has to be a job whose output drives a downstream
+  # `if:`. Implementation is deliberately bash-only — no new
+  # third-party action in the supply chain just for path matching.
+  changed-paths:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: server
+    timeout-minutes: 1
+    permissions:
+      contents: read
+    outputs:
+      backup-roundtrip: ${{ steps.filter.outputs.backup-roundtrip }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2
         with:
           egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Detect changed paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            base="${PR_BASE_SHA}"; head="${PR_HEAD_SHA}"
+          elif [ "${EVENT_NAME}" = "push" ]; then
+            # First push to a new branch reports an all-zero "before"
+            # SHA; in that case fall back to the previous commit so
+            # diff stays well-defined.
+            if [ "${PUSH_BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+              base="${PUSH_AFTER}^"
+            else
+              base="${PUSH_BEFORE}"
+            fi
+            head="${PUSH_AFTER}"
+          else
+            # workflow_dispatch and any future trigger: fail open and
+            # run every gated job. Surprising a developer with skipped
+            # validations on a manual run is worse than a few minutes
+            # of extra runner time.
+            echo "backup-roundtrip=true" >> "${GITHUB_OUTPUT}"
+            echo "docker=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          changed=$(git diff --name-only "${base}" "${head}")
+          echo "Changed files vs ${base}:"
+          echo "${changed//$'\n'/$'\n  '}" | awk 'NF{print "  " $0}'
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
-        with:
-          go-version-file: server/go.mod
+          match() {
+            # match <name> <pattern>...; emits "<name>=true|false" to GITHUB_OUTPUT
+            local name="$1"; shift
+            for pattern in "$@"; do
+              if printf '%s\n' "${changed}" | grep -qE "${pattern}"; then
+                echo "${name}=true" >> "${GITHUB_OUTPUT}"
+                echo "  -> ${name}: matched ${pattern}"
+                return
+              fi
+            done
+            echo "${name}=false" >> "${GITHUB_OUTPUT}"
+            echo "  -> ${name}: no match"
+          }
 
-      - name: Build
-        run: go build -trimpath ./...
+          match backup-roundtrip \
+            '^server/internal/storage/sqlite/' \
+            '^server/go\.(mod|sum)$' \
+            '^\.github/workflows/(backup-roundtrip|ci)\.yml$'
 
-      - name: Vet
-        run: go vet ./...
+          match docker \
+            '^server/' \
+            '^\.github/workflows/(docker|ci)\.yml$'
 
-      - name: Test
-        run: go test -race -count=1 -coverprofile=coverage.out ./...
+  # Tier 1 — fast checks that don't need a Go build. Run in parallel
+  # with the security scans so an obvious problem (leaked secret,
+  # missing DCO, malformed workflow) surfaces in seconds instead of
+  # waiting on a 5-minute Go test.
+  gitleaks:
+    uses: ./.github/workflows/gitleaks.yml
+    permissions:
+      contents: read
+
+  dco:
+    # DCO only makes sense on PR events; the called workflow inspects
+    # github.event.pull_request.* which is empty on push-to-main.
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/dco.yml
+    permissions:
+      contents: read
+
+  zizmor:
+    uses: ./.github/workflows/zizmor.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  # Tier 1 — security scans, parallel to fast checks. CodeQL is the
+  # heaviest job in the graph (~10 minutes) so kicking it off
+  # immediately rather than after build-test minimises wall time.
+  codeql:
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+  osv-scanner:
+    uses: ./.github/workflows/osv-scanner.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  # Tier 2 — Go build + race tests. Gated on the Tier 1 fast checks
+  # so a dirty PR does not waste runner time on the slow path.
+  build-test:
+    needs: [gitleaks, zizmor]
+    uses: ./.github/workflows/build-test.yml
+    permissions:
+      contents: read
+
+  # Tier 3 — feature-level validations that need the freshly built
+  # binary or its sources. Each is independent of the others and runs
+  # in parallel as soon as build-test goes green.
+  smoke:
+    needs: build-test
+    uses: ./.github/workflows/smoke.yml
+    permissions:
+      contents: read
+
+  docker:
+    needs: [build-test, changed-paths]
+    if: needs.changed-paths.outputs.docker == 'true'
+    uses: ./.github/workflows/docker.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+  backup-roundtrip:
+    needs: [build-test, changed-paths]
+    if: needs.changed-paths.outputs.backup-roundtrip == 'true'
+    uses: ./.github/workflows/backup-roundtrip.yml
+    permissions:
+      contents: read
+
+  # The single status check branch protection should require. Runs
+  # `if: always()` so it executes even when an upstream job fails;
+  # the python check below translates "any failure or cancellation"
+  # into a non-zero exit. Some jobs are legitimately skipped:
+  #   - dco: gated on event_name == 'pull_request'; skipped on push.
+  #   - docker, backup-roundtrip: gated on the changed-paths filter;
+  #     skipped when no relevant file changed.
+  # Any OTHER skipped status is treated as a failure because it
+  # most likely means an upstream job failed and the dependency
+  # chain unwound, which the python report should surface explicitly.
+  ci-success:
+    name: ci-success
+    needs:
+      - changed-paths
+      - gitleaks
+      - dco
+      - zizmor
+      - codeql
+      - osv-scanner
+      - build-test
+      - smoke
+      - docker
+      - backup-roundtrip
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify all required jobs succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ["RESULTS"])
+          allowed_skip = {"dco", "docker", "backup-roundtrip"}
+          failed = []
+          for name, info in results.items():
+              status = info.get("result", "?")
+              print(f"  {name}: {status}")
+              if status in ("failure", "cancelled"):
+                  failed.append(f"{name} ({status})")
+              elif status == "skipped" and name not in allowed_skip:
+                  failed.append(f"{name} (unexpectedly skipped)")
+          if failed:
+              print("::error::CI gate failed: " + ", ".join(failed))
+              sys.exit(1)
+          print("::notice::All required jobs succeeded")
+          PY

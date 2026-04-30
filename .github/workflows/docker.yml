@@ -2,25 +2,25 @@
 # SLSA provenance and SBOM attestations, and signs it via keyless cosign.
 #
 # Triggers:
-#   push to main when server/ or this workflow change — proves the build is
-#     green and gives OpenSSF Scorecard's packaging probe a successful run on
-#     the default branch (the probe ignores tag-only triggers).
+#   workflow_call — invoked by .github/workflows/ci.yml as a Tier 3
+#     feature-level validation. The push step is naturally skipped
+#     because github.ref on PR / main-push is not a tag.
 #   push of a server-vX.Y.Z tag — actually publishes and signs the image.
+#     This trigger remains independent of ci.yml so a tag push does
+#     not have to wait for the full CI suite.
 #   workflow_dispatch — manual escape hatch (no push).
 #
-# Push to ghcr is gated on tag refs only; default-branch and dispatch runs
-# build the image without publishing.
+# Push to ghcr is gated on tag refs only; PR / main-push / dispatch
+# runs build the image without publishing, which proves the
+# Dockerfile is healthy without producing release artifacts.
 name: docker
 
 on:
+  workflow_call:
+  workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'server/**'
-      - '.github/workflows/docker.yml'
     tags:
       - 'server-v*'
-  workflow_dispatch:
 
 permissions:
   contents: read

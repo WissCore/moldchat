@@ -1,7 +1,8 @@
-# Reusable: invoked by .github/workflows/ci.yml as a Tier 3
-# feature-level validation. Builds the moldd binary and exercises
-# every smoke case registered in server/internal/smoke/.
-name: smoke
+# Reusable: invoked by .github/workflows/ci.yml as the build-test
+# tier of the orchestrator. Also exposed via workflow_dispatch so
+# operators can re-run just the Go build+test from the Actions UI
+# without re-running the whole CI suite.
+name: build-test
 
 on:
   workflow_call:
@@ -11,10 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: server smoke
+  server:
+    name: server (Go)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: server
@@ -34,8 +35,11 @@ jobs:
         with:
           go-version-file: server/go.mod
 
-      - name: Run smoke suite
-        # Mirrors `mise run smoke` exactly. Adding a new smoke
-        # scenario only requires dropping a *_smoke.go file in
-        # server/internal/smoke/ — no edits here.
-        run: go test -tags smoke -count=1 -timeout=2m ./internal/smoke/...
+      - name: Build
+        run: go build -trimpath ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 -coverprofile=coverage.out ./...

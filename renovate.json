@@ -32,6 +32,12 @@
       "addLabels": ["crypto-review-required"]
     },
     {
+      "description": "SLSA generator: must stay tag-pinned. Upstream builder-fetch.sh validates the calling ref against ^refs/tags/vX.Y.Z$ and refuses SHA references; the BuilderID baked into the generated provenance is the tag, so SHA-pinning also breaks slsa-verifier downstream. See slsa-framework/slsa-github-generator#4216.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["slsa-framework/slsa-github-generator"],
+      "pinDigests": false
+    },
+    {
       "description": "Dev tooling: auto-merge minor/patch after CI",
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],

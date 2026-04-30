@@ -1,5 +1,5 @@
 {
-  "server": "0.1.6",
+  "server": "0.1.7",
   "apps/android": "0.0.0",
   "apps/ios": "0.0.0"
 }

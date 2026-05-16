@@ -2,7 +2,7 @@
 # Run `mise install` after cloning to set up the toolchain.
 
 [tools]
-go     = "1.26.2"
+go     = "1.26.3"
 java   = "temurin-21"
 kotlin = "2.3.21"
 node   = "24.15.0"

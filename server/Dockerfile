@@ -5,7 +5,7 @@
 # config:best-practices -> docker:pinDigests).
 ARG GO_VERSION=1.26.2
 ARG BUILDER_IMAGE=golang:${GO_VERSION}-bookworm@sha256:47ce5636e9936b2c5cbf708925578ef386b4f8872aec74a67bd13a627d242b19
-ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot@sha256:e2d29aec8061843706b7e484c444f78fafb05bfe47745505252b1769a05d14f1
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
 
 FROM ${BUILDER_IMAGE} AS builder
 

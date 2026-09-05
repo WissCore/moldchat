@@ -324,36 +324,36 @@ checksum = "sha256:d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332af
 url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip"
 
 [[tools.go]]
-version = "1.26.2"
+version = "1.27.1"
 backend = "core:go"
 
 [tools.go."platforms.linux-arm64"]
-checksum = "sha256:c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23"
-url = "https://dl.google.com/go/go1.26.2.linux-arm64.tar.gz"
+checksum = "sha256:3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec"
+url = "https://dl.google.com/go/go1.27.1.linux-arm64.tar.gz"
 
 [tools.go."platforms.linux-arm64-musl"]
-checksum = "sha256:c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23"
-url = "https://dl.google.com/go/go1.26.2.linux-arm64.tar.gz"
+checksum = "sha256:3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec"
+url = "https://dl.google.com/go/go1.27.1.linux-arm64.tar.gz"
 
 [tools.go."platforms.linux-x64"]
-checksum = "sha256:990e6b4bbba816dc3ee129eaeaf4b42f17c2800b88a2166c265ac1a200262282"
-url = "https://dl.google.com/go/go1.26.2.linux-amd64.tar.gz"
+checksum = "sha256:63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+url = "https://dl.google.com/go/go1.27.1.linux-amd64.tar.gz"
 
 [tools.go."platforms.linux-x64-musl"]
-checksum = "sha256:990e6b4bbba816dc3ee129eaeaf4b42f17c2800b88a2166c265ac1a200262282"
-url = "https://dl.google.com/go/go1.26.2.linux-amd64.tar.gz"
+checksum = "sha256:63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+url = "https://dl.google.com/go/go1.27.1.linux-amd64.tar.gz"
 
 [tools.go."platforms.macos-arm64"]
-checksum = "sha256:32af1522bf3e3ff3975864780a429cc0b41d190ec7bf90faa661d6d64566e7af"
-url = "https://dl.google.com/go/go1.26.2.darwin-arm64.tar.gz"
+checksum = "sha256:ee215d57e0ec269c60cc9ceca68e6bda321ba9ee5afe24f4b0988703c2d87d12"
+url = "https://dl.google.com/go/go1.27.1.darwin-arm64.tar.gz"
 
 [tools.go."platforms.macos-x64"]
-checksum = "sha256:bc3f1500d9968c36d705442d90ba91addf9271665033748b82532682e90a7966"
-url = "https://dl.google.com/go/go1.26.2.darwin-amd64.tar.gz"
+checksum = "sha256:8f8f52c6649542cf027bbc9b9c68d1ec042f9f34808a40413f0b8b3f66f3caa4"
+url = "https://dl.google.com/go/go1.27.1.darwin-amd64.tar.gz"
 
 [tools.go."platforms.windows-x64"]
-checksum = "sha256:98eb3570bade15cb826b0909338df6cc6d2cf590bc39c471142002db3832b708"
-url = "https://dl.google.com/go/go1.26.2.windows-amd64.zip"
+checksum = "sha256:a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d"
+url = "https://dl.google.com/go/go1.27.1.windows-amd64.zip"
 
 [[tools."go:golang.org/x/vuln/cmd/govulncheck"]]
 version = "1.3.0"
@@ -403,46 +403,46 @@ version = "temurin-21.0.10+7.0.LTS"
 backend = "core:java"
 
 [[tools.kotlin]]
-version = "2.1.0"
+version = "2.4.10"
 backend = "github:JetBrains/kotlin"
 
 [tools.kotlin.options]
 asset_pattern = "kotlin-compiler-*.zip"
 
 [tools.kotlin."platforms.linux-arm64"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.linux-arm64-musl"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.linux-x64"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.linux-x64-musl"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.macos-arm64"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.macos-x64"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [tools.kotlin."platforms.windows-x64"]
-checksum = "sha256:b6698d5728ad8f9edcdd01617d638073191d8a03139cc538a391b4e3759ad297"
-url = "https://github.com/JetBrains/kotlin/releases/download/v2.1.0/kotlin-compiler-2.1.0.zip"
-url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/209423362"
+checksum = "sha256:473dd66c7a3ef4b182065b3da670466c1bf2773a9dbb0ed8b33a39fe9d4f876d"
+url = "https://github.com/JetBrains/kotlin/releases/download/v2.4.10/kotlin-compiler-2.4.10.zip"
+url_api = "https://api.github.com/repos/JetBrains/kotlin/releases/assets/476575537"
 
 [[tools.ktlint]]
 version = "1.8.0"
